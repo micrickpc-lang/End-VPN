@@ -112,16 +112,16 @@ class _ClickerPageState extends State<ClickerPage>
 
     _userUuid = await RemnawaveService().getSavedUuid();
 
-    int remoteCoins = 0;
-    if (_userUuid != null) {
-      try {
-        remoteCoins = await RemnawaveService().getClickerBalance(_userUuid!);
-      } catch (_) {
-        remoteCoins = _prefs!.getInt(_keyCoins) ?? 0;
-      }
-    } else {
-      remoteCoins = _prefs!.getInt(_keyCoins) ?? 0;
-    }
+final localCoins = _prefs!.getInt(_keyCoins) ?? 0;
+int remoteCoins = localCoins;
+if (_userUuid != null) {
+  try {
+    final fetched = await RemnawaveService().getClickerBalance(_userUuid!);
+    remoteCoins = fetched > localCoins ? fetched : localCoins;
+  } catch (_) {
+    remoteCoins = localCoins;
+  }
+}
 
     if (!mounted) return;
     setState(() {
