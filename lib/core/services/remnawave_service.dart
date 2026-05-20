@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:logger/logger.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:endvpn/core/config/app_config.dart';
 import 'package:endvpn/core/models/user_model.dart';
 
@@ -13,7 +14,6 @@ class RemnawaveService {
 
   final _log = Logger();
 
-  // ✅ encryptedSharedPreferences — фикс потери UUID между сессиями на Android
   final _storage = const FlutterSecureStorage(
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
   );
@@ -25,10 +25,15 @@ class RemnawaveService {
   static const _keyTgId   = 'user_tg_id';
   static const _keyAnonId = 'anon_user_uuid';
 
+  // SharedPreferences ключи для бэкапа (выживают после переустановки на Android)
+  static const _spKeyUuid   = 'sp_user_uuid';
+  static const _spKeyAnonId = 'sp_anon_uuid';
+  static const _spKeySubUrl = 'sp_sub_url';
+
   static const freeSquadUuid = '2890e16a-a2be-4049-9413-fb3531a3cbdb';
   static const paidSquadUuid = '833414d4-ca2d-47c0-87da-24d6b38a9f20';
 
-  // ── Lazy init — безопасно вызывать несколько раз ─────────────────────────
+  // ── Lazy init ─────────────────────────────────────────────────────────────
 
   void init() {
     if (_dio != null) return;
@@ -46,6 +51,46 @@ class RemnawaveService {
   Dio get _client {
     if (_dio == null) init();
     return _dio!;
+  }
+
+  // ── SharedPreferences бэкап ───────────────────────────────────────────────
+
+  /// Читает UUID: сначала SecureStorage, фолбэк на SharedPreferences
+  Future<String?> _readUuidWithFallback(String secureKey, String spKey) async {
+    final fromSecure = await _storage.read(key: secureKey);
+    if (fromSecure != null && fromSecure.isNotEmpty) return fromSecure;
+
+    // SecureStorage пуст (переустановка?) — пробуем бэкап
+    final prefs = await SharedPreferences.getInstance();
+    final fromSp = prefs.getString(spKey);
+    if (fromSp != null && fromSp.isNotEmpty) {
+      _log.i('UUID restored from SharedPreferences backup: $fromSp');
+      // Восстанавливаем в SecureStorage
+      await _storage.write(key: secureKey, value: fromSp);
+      return fromSp;
+    }
+    return null;
+  }
+
+  /// Сохраняет UUID в оба хранилища
+  Future<void> _writeUuidBoth(String secureKey, String spKey, String value) async {
+    await _storage.write(key: secureKey, value: value);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(spKey, value);
+  }
+
+  /// Сохраняет subUrl в оба хранилища
+  Future<void> _writeSubUrlBoth(String value) async {
+    await _storage.write(key: _keySubUrl, value: value);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_spKeySubUrl, value);
+  }
+
+  Future<String?> _readSubUrlWithFallback() async {
+    final fromSecure = await _storage.read(key: _keySubUrl);
+    if (fromSecure != null && fromSecure.isNotEmpty) return fromSecure;
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_spKeySubUrl);
   }
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -82,24 +127,25 @@ class RemnawaveService {
        e.type == DioExceptionType.receiveTimeout ||
        e.type == DioExceptionType.sendTimeout);
 
-  // ─── Анонимный юзер (без авторизации) ────────────────────────────────────
+  // ─── Анонимный юзер ───────────────────────────────────────────────────────
 
   Future<UserModel> getOrCreateAnonUser() async {
-    final savedUuid = await _storage.read(key: _keyAnonId);
+    final savedUuid = await _readUuidWithFallback(_keyAnonId, _spKeyAnonId);
 
     if (savedUuid != null && savedUuid.isNotEmpty) {
       try {
         final user = await _getUserByUuid(savedUuid);
 
-        // Валидация: убеждаемся что это наш анон, а не чужой юзер
         if (!user.username.startsWith('anon_')) {
           _log.w('Stored anon UUID points to non-anon user (${user.username}) — resetting');
           await _storage.delete(key: _keyAnonId);
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.remove(_spKeyAnonId);
           return await _createAnonUser();
         }
 
         if (user.subscriptionUrl.isNotEmpty) {
-          await _storage.write(key: _keySubUrl, value: user.subscriptionUrl);
+          await _writeSubUrlBoth(user.subscriptionUrl);
         }
         _log.i('Loaded anon user: ${user.uuid} (${user.username})');
         return user;
@@ -108,32 +154,15 @@ class RemnawaveService {
         _log.w('Anon UUID load failed: $e');
 
         if (_is404(e)) {
-          // Юзер реально удалён на сервере — создаём нового
           _log.w('Anon user 404 — creating new');
           await _storage.delete(key: _keyAnonId);
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.remove(_spKeyAnonId);
           return await _createAnonUser();
         }
 
-        // Сетевая / любая другая ошибка — UUID НЕ удаляем, фолбэк на кеш
-        if (_isNetworkError(e)) {
-          _log.w('Network error — keeping UUID, falling back to cache');
-          final cachedSub = await _storage.read(key: _keySubUrl) ?? '';
-          if (cachedSub.isNotEmpty) {
-            return UserModel(
-              uuid: savedUuid,
-              username: 'anon',
-              subscriptionUrl: cachedSub,
-              trafficLimitBytes: 15 * 1024 * 1024 * 1024,
-              usedTrafficBytes: 0,
-              isActive: true,
-              subscriptionType: 'free',
-              clickerBalance: 0,
-            );
-          }
-        }
-
-        // Неизвестная ошибка — тоже не удаляем UUID, просто пробуем кеш
-        final cachedSub = await _storage.read(key: _keySubUrl) ?? '';
+        // Сетевая ошибка — фолбэк на кеш
+        final cachedSub = await _readSubUrlWithFallback() ?? '';
         if (cachedSub.isNotEmpty) {
           return UserModel(
             uuid: savedUuid,
@@ -147,7 +176,6 @@ class RemnawaveService {
           );
         }
 
-        // Кеша нет — создаём нового (крайний случай)
         _log.w('No cache available — creating new anon user');
         return await _createAnonUser();
       }
@@ -165,10 +193,10 @@ class RemnawaveService {
     final body = {
       'username': username,
       'expireAt': DateTime.now()
-          .add(const Duration(days: 36500)) // ~100 лет = бессрочно
+          .add(const Duration(days: 36500))
           .toUtc()
           .toIso8601String(),
-      'trafficLimitBytes': 15 * 1024 * 1024 * 1024, // 15 GB
+      'trafficLimitBytes': 15 * 1024 * 1024 * 1024,
       'trafficLimitStrategy': 'NO_RESET',
       'status': 'ACTIVE',
       'hwidDeviceLimit': 2,
@@ -180,9 +208,9 @@ class RemnawaveService {
     final data = _unwrap(resp.data);
     final user = _mapUser(data);
 
-    await _storage.write(key: _keyAnonId, value: user.uuid);
+    await _writeUuidBoth(_keyAnonId, _spKeyAnonId, user.uuid);
     if (user.subscriptionUrl.isNotEmpty) {
-      await _storage.write(key: _keySubUrl, value: user.subscriptionUrl);
+      await _writeSubUrlBoth(user.subscriptionUrl);
     }
     _log.i('Created anon user: ${user.uuid} (${user.username})');
     return user;
@@ -191,22 +219,24 @@ class RemnawaveService {
   // ─── Юзер по Telegram ID ─────────────────────────────────────────────────
 
   Future<UserModel> getOrCreateUserByTgId(int tgId) async {
-    final savedUuid = await _storage.read(key: _keyUuid);
-    final savedTgId = await _storage.read(key: _keyTgId);
+    final savedUuid  = await _readUuidWithFallback(_keyUuid, _spKeyUuid);
+    final savedTgId  = await _storage.read(key: _keyTgId);
 
     if (savedUuid != null && savedUuid.isNotEmpty && savedTgId == tgId.toString()) {
       try {
         final user = await _getUserByUuid(savedUuid);
         if (user.subscriptionUrl.isNotEmpty) {
-          await _storage.write(key: _keySubUrl, value: user.subscriptionUrl);
+          await _writeSubUrlBoth(user.subscriptionUrl);
         }
         _log.i('Loaded by uuid: ${user.uuid}');
         return user;
       } catch (e) {
         if (_is404(e)) {
           await _storage.delete(key: _keyUuid);
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.remove(_spKeyUuid);
         } else if (_isNetworkError(e)) {
-          final cachedSub = await _storage.read(key: _keySubUrl) ?? '';
+          final cachedSub = await _readSubUrlWithFallback() ?? '';
           if (cachedSub.isNotEmpty) {
             return UserModel(
               uuid: savedUuid,
@@ -222,16 +252,18 @@ class RemnawaveService {
         } else {
           _log.w('UUID load failed: $e — clearing cache');
           await _storage.delete(key: _keyUuid);
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.remove(_spKeyUuid);
         }
       }
     }
 
     try {
       final user = await _getUserByTelegramId(tgId);
-      await _storage.write(key: _keyUuid, value: user.uuid);
+      await _writeUuidBoth(_keyUuid, _spKeyUuid, user.uuid);
       await _storage.write(key: _keyTgId, value: tgId.toString());
       if (user.subscriptionUrl.isNotEmpty) {
-        await _storage.write(key: _keySubUrl, value: user.subscriptionUrl);
+        await _writeSubUrlBoth(user.subscriptionUrl);
       }
       _log.i('Found by telegramId: ${user.uuid}');
       return user;
@@ -302,10 +334,10 @@ class RemnawaveService {
     final data = _unwrap(resp.data);
     final user = _mapUser(data);
 
-    await _storage.write(key: _keyUuid, value: user.uuid);
+    await _writeUuidBoth(_keyUuid, _spKeyUuid, user.uuid);
     await _storage.write(key: _keyTgId, value: tgId.toString());
     if (user.subscriptionUrl.isNotEmpty) {
-      await _storage.write(key: _keySubUrl, value: user.subscriptionUrl);
+      await _writeSubUrlBoth(user.subscriptionUrl);
     }
     _log.i('Created tg user: ${user.uuid}');
     return user;
@@ -313,36 +345,35 @@ class RemnawaveService {
 
   // ─── Активация подписки ───────────────────────────────────────────────────
 
-Future<UserModel> activateSubscription(String uuid, int days) async {
-  int clicks = 0;
-  DateTime baseDate = DateTime.now();
-  try {
-    final current = await _getUserByUuid(uuid);
-    clicks = current.clickerBalance;
-    // Если подписка ещё активна — продлеваем от её конца
-    if (current.expireAt != null && current.expireAt!.isAfter(DateTime.now())) {
-      baseDate = current.expireAt!;
+  Future<UserModel> activateSubscription(String uuid, int days) async {
+    int clicks = 0;
+    DateTime baseDate = DateTime.now();
+    try {
+      final current = await _getUserByUuid(uuid);
+      clicks = current.clickerBalance;
+      if (current.expireAt != null && current.expireAt!.isAfter(DateTime.now())) {
+        baseDate = current.expireAt!;
+      }
+    } catch (_) {}
+
+    final expireAt = baseDate.add(Duration(days: days)).toUtc().toIso8601String();
+    final resp = await _client.patch('/api/users/', data: {
+      'uuid': uuid,
+      'expireAt': expireAt,
+      'trafficLimitBytes': 0,
+      'status': 'ACTIVE',
+      'description': _buildDescription(clicks),
+      'activeInternalSquads': [paidSquadUuid],
+    });
+
+    final user = _mapUser(_unwrap(resp.data));
+    if (user.subscriptionUrl.isNotEmpty) {
+      await _writeSubUrlBoth(user.subscriptionUrl);
     }
-  } catch (_) {}
-
-  final expireAt = baseDate.add(Duration(days: days)).toUtc().toIso8601String();
-  // ПРАВИЛЬНЫЙ ЭНДПОИНТ: PATCH /api/users/ с uuid в теле
-final resp = await _client.patch('/api/users/', data: {
-  'uuid': uuid,
-  'expireAt': expireAt,
-  'trafficLimitBytes': 0,  // безлимит для paid
-  'status': 'ACTIVE',
-  'description': _buildDescription(clicks),
-  'activeInternalSquads': [paidSquadUuid],
-});
-
-  final user = _mapUser(_unwrap(resp.data));
-  if (user.subscriptionUrl.isNotEmpty) {
-    await _storage.write(key: _keySubUrl, value: user.subscriptionUrl);
+    _log.i('Activated paid: ${user.uuid}, days: $days');
+    return user;
   }
-  _log.i('Activated paid: ${user.uuid}, days: $days');
-  return user;
-}
+
   // ─── Кликер ───────────────────────────────────────────────────────────────
 
   Future<int> getClickerBalance(String uuid) async {
@@ -350,43 +381,45 @@ final resp = await _client.patch('/api/users/', data: {
     return user.clickerBalance;
   }
 
-Future<void> saveClickerBalance(String uuid, int clicks) async {
-  try {
-    await _client.patch('/api/users/', data: {
-      'uuid': uuid,
-      'description': _buildDescription(clicks),
-    });
-  } catch (e) {
-    _log.w('saveClickerBalance error: $e');
+  Future<void> saveClickerBalance(String uuid, int clicks) async {
+    try {
+      await _client.patch('/api/users/', data: {
+        'uuid': uuid,
+        'description': _buildDescription(clicks),
+      });
+    } catch (e) {
+      _log.w('saveClickerBalance error: $e');
+    }
   }
-}
 
   // ─── User mapping ─────────────────────────────────────────────────────────
 
-UserModel _mapUser(Map<String, dynamic> data) {
-  final squads  = (data['activeInternalSquads'] as List?) ?? [];
-  final isPaid  = squads.any((s) => (s as Map)['uuid'] == paidSquadUuid);
-  final clicks  = _parseClicks(data['description'] as String?);
-  final traffic = (data['userTraffic'] as Map<String, dynamic>?) ?? {};
+  UserModel _mapUser(Map<String, dynamic> data) {
+    final squads = (data['activeInternalSquads'] as List?) ?? [];
+    final isPaid = squads.any((s) => (s as Map)['uuid'] == paidSquadUuid);
+    final clicks = _parseClicks(data['description'] as String?);
+    final traffic = (data['userTraffic'] as Map<String, dynamic>?) ?? {};
 
-  return UserModel(
-    uuid: data['uuid'] as String? ?? '',
-    username: data['username'] as String? ?? '',
-    subscriptionUrl: data['subscriptionUrl'] as String? ?? '',
-    expireAt: data['expireAt'] != null ? DateTime.tryParse(data['expireAt'].toString()) : null, // ← добавь
-    trafficLimitBytes: (data['trafficLimitBytes'] as num?)?.toInt() ?? 0,
-    usedTrafficBytes: (traffic['usedTrafficBytes'] as num?)?.toInt() ?? 0,
-    isActive: data['status'] == 'ACTIVE',
-    subscriptionType: isPaid ? 'paid' : 'free',
-    clickerBalance: clicks,
-  );
-}
+    return UserModel(
+      uuid: data['uuid'] as String? ?? '',
+      username: data['username'] as String? ?? '',
+      subscriptionUrl: data['subscriptionUrl'] as String? ?? '',
+      expireAt: data['expireAt'] != null
+          ? DateTime.tryParse(data['expireAt'].toString())
+          : null,
+      trafficLimitBytes: (data['trafficLimitBytes'] as num?)?.toInt() ?? 0,
+      usedTrafficBytes: (traffic['usedTrafficBytes'] as num?)?.toInt() ?? 0,
+      isActive: data['status'] == 'ACTIVE',
+      subscriptionType: isPaid ? 'paid' : 'free',
+      clickerBalance: clicks,
+    );
+  }
 
   // ─── Storage helpers ──────────────────────────────────────────────────────
 
-  Future<String?> getSavedUuid()     => _storage.read(key: _keyUuid);
+  Future<String?> getSavedUuid()     => _readUuidWithFallback(_keyUuid, _spKeyUuid);
   Future<String?> getSavedTgId()     => _storage.read(key: _keyTgId);
-  Future<String?> getSavedAnonUuid() => _storage.read(key: _keyAnonId);
+  Future<String?> getSavedAnonUuid() => _readUuidWithFallback(_keyAnonId, _spKeyAnonId);
 
   Future<void> saveTgId(int tgId) async {
     await _storage.write(key: _keyTgId, value: tgId.toString());
@@ -396,12 +429,18 @@ UserModel _mapUser(Map<String, dynamic> data) {
     await _storage.delete(key: _keyUuid);
     await _storage.delete(key: _keyTgId);
     await _storage.delete(key: _keySubUrl);
-    // Анонимный UUID не трогаем — сессия анона сохраняется
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_spKeyUuid);
+    // Анонимный UUID не трогаем
   }
 
-  /// Полный сброс — для дебага или смены аккаунта
+  /// Полный сброс — для дебага
   Future<void> clearAll() async {
     await _storage.deleteAll();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_spKeyUuid);
+    await prefs.remove(_spKeyAnonId);
+    await prefs.remove(_spKeySubUrl);
     _log.i('All storage cleared');
   }
 }
