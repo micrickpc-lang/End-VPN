@@ -342,7 +342,6 @@ class _HomePageState extends State<HomePage>
       'rustore.ru',
     ];
 
-    // Яндекс IP (ASN AS13238 + AS43247) — отдельно чтобы работал роутинг по IP
     const yandexIpRanges = [
       '5.45.192.0/18',
       '5.255.192.0/18',
@@ -356,7 +355,6 @@ class _HomePageState extends State<HomePage>
       '141.8.128.0/18',
       '178.154.128.0/18',
       '213.180.192.0/18',
-      // IPv6
       '2a02:6b8::/32',
     ];
 
@@ -366,7 +364,7 @@ class _HomePageState extends State<HomePage>
         'servers': [
           {
             'tag': 'local',
-            'address': '77.88.8.8', // Яндекс DNS — быстрый, не блокируется в РФ
+            'address': '77.88.8.8',
             'detour': 'direct',
           },
           {
@@ -376,14 +374,11 @@ class _HomePageState extends State<HomePage>
           },
         ],
         'rules': [
-          // .ru и Яндекс домены резолвим через локальный DNS →
-          // получаем российский IP → он попадёт в yandexIpRanges → direct
           {'domain_suffix': directDomains, 'server': 'local'},
         ],
         'strategy': 'prefer_ipv4',
         'final': 'remote',
         'independent_cache': true,
-        // ВАЖНО: reverse_mapping позволяет route rules матчить домен по IP
         'reverse_mapping': true,
       },
       'inbounds': [
@@ -391,12 +386,13 @@ class _HomePageState extends State<HomePage>
           'type': 'tun',
           'tag': 'tun-in',
           'address': ['172.19.0.1/30', 'fdfe:dcba:9876::1/126'],
-          'mtu': 1500,
+          'mtu': 9000,           // ← увеличен для скорости
           'auto_route': true,
-          'strict_route': false,
+          'strict_route': true,  // ← включён: корректный UDP/QUIC роутинг
           'stack': 'system',
-          'sniff': false,
-          'udp_timeout': '60s',
+          'sniff': true,         // ← включён: QUIC/YouTube определяется правильно
+          'sniff_override_destination': false,
+          'udp_timeout': '300s', // ← 5 минут вместо 60с для стриминга
         }
       ],
       'outbounds': [
@@ -413,10 +409,7 @@ class _HomePageState extends State<HomePage>
       ],
       'route': {
         'rules': [
-          // 1. DNS
           {'protocol': 'dns', 'outbound': 'dns-out'},
-
-          // 2. Локальные адреса
           {
             'ip_cidr': [
               '127.0.0.0/8',
@@ -427,17 +420,11 @@ class _HomePageState extends State<HomePage>
             ],
             'outbound': 'direct',
           },
-
-          // 3. Яндекс IP — отдельным правилом (критично для работы Яндекса)
           {
             'ip_cidr': yandexIpRanges,
             'outbound': 'direct',
           },
-
-          // 4. Домены напрямую (резервный матч через reverse_mapping)
           {'domain_suffix': directDomains, 'outbound': 'direct'},
-
-          // 5. Торренты
           {'protocol': 'bittorrent', 'outbound': 'direct'},
         ],
         'final': 'proxy',
