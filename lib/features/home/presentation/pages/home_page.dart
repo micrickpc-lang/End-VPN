@@ -89,6 +89,7 @@ class _HomePageState extends State<HomePage>
 
   bool _isConnected  = false;
   bool _isConnecting = false;
+  bool _isDataLoading = true; // блокирует кнопку пока грузится конфиг
   String _statusText    = 'ОТКЛЮЧЕНО';
   String _uploadSpeed   = '--';
   String _downloadSpeed = '--';
@@ -226,8 +227,11 @@ class _HomePageState extends State<HomePage>
   }
 
   Future<void> _loadData() async {
+    // Сначала пробуем кешированный конфиг — чтобы кнопка разблокировалась быстро
     await _vpn.loadCachedConfig();
-    if (mounted) setState(() {});
+    if (_vpn.singboxConfig != null && mounted) {
+      setState(() => _isDataLoading = false);
+    }
 
     try {
       RemnawaveService().init();
@@ -247,9 +251,13 @@ class _HomePageState extends State<HomePage>
         if (cachedUrl != null) await _fetchSubscription(cachedUrl);
       }
     } catch (e) {
+      debugPrint('Load data error: $e');
+      // Пробуем кешированный URL как фолбэк
       final cachedUrl = await _vpn.loadSubUrl();
       if (cachedUrl != null) await _fetchSubscription(cachedUrl);
-      debugPrint('Load data error: $e');
+    } finally {
+      // Гарантированно снимаем блокировку кнопки
+      if (mounted) setState(() => _isDataLoading = false);
     }
   }
 
@@ -314,31 +322,21 @@ class _HomePageState extends State<HomePage>
 
   String _buildSingboxConfig(List<Map<String, dynamic>> outbounds, String selectedTag) {
     const directDomains = [
-      // Русские TLD
       '.ru', '.xn--p1ai', '.su',
-      // ВКонтакте
       'vk.com', 'vk.me', 'vk.ru', 'vkontakte.ru',
       'userapi.com', 'vkvideo.ru', 'vkuseraudio.net',
       'vkplay.ru', 'vkplaylive.ru',
-      // Яндекс
       'yandex.ru', 'yandex.com', 'yandex.net', 'yandex.kz', 'yandex.by',
       'yastatic.net', 'yandex-team.ru', 'yadi.sk', 'ya.ru',
       'kinopoisk.ru', 'kinopoisk.com',
-      // Авито
       'avito.ru', 'avito.st',
-      // Почта
       'mail.ru', 'inbox.ru', 'bk.ru', 'list.ru',
-      // Одноклассники
       'ok.ru',
-      // Банки
       'sberbank.ru', 'sber.ru', 'sberpay.ru',
       'tbank.ru', 'tinkoff.ru',
       'alfabank.ru', 'vtb.ru', 'raiffeisen.ru',
-      // Госуслуги
       'gosuslugi.ru', 'mos.ru', 'nalog.ru', 'pfr.gov.ru',
-      // Маркетплейсы
       'wildberries.ru', 'wb.ru', 'ozon.ru',
-      // RuStore
       'rustore.ru',
     ];
 
@@ -359,18 +357,23 @@ class _HomePageState extends State<HomePage>
     ];
 
     final config = {
-      'log': {'level': 'error', 'timestamp': false},
+      'log': {'level': 'warn', 'timestamp': false},
       'dns': {
         'servers': [
           {
             'tag': 'local',
-            'address': '77.88.8.8',
+            'address': '223.5.5.5',
             'detour': 'direct',
           },
           {
             'tag': 'remote',
             'address': 'https://1.1.1.1/dns-query',
             'detour': selectedTag,
+          },
+          {
+            'tag': 'local-fallback',
+            'address': '8.8.4.4',
+            'detour': 'direct',
           },
         ],
         'rules': [
@@ -386,13 +389,16 @@ class _HomePageState extends State<HomePage>
           'type': 'tun',
           'tag': 'tun-in',
           'address': ['172.19.0.1/30', 'fdfe:dcba:9876::1/126'],
-          'mtu': 9000,           // ← увеличен для скорости
+          'mtu': 1500,
           'auto_route': true,
-          'strict_route': true,  // ← включён: корректный UDP/QUIC роутинг
+          // ↓ ФИКС ERR_CONNECTION: system stack + strict_route=false — самая совместимая комбинация
+          // mixed+strict=false ломает браузеры; mixed+strict=true ломает некоторые приложения
+          // system+strict=false работает корректно на большинстве Android устройств
+          'strict_route': false,
           'stack': 'system',
-          'sniff': true,         // ← включён: QUIC/YouTube определяется правильно
+          'sniff': true,
           'sniff_override_destination': false,
-          'udp_timeout': '300s', // ← 5 минут вместо 60с для стриминга
+          'udp_timeout': '300s',
         }
       ],
       'outbounds': [
@@ -409,22 +415,37 @@ class _HomePageState extends State<HomePage>
       ],
       'route': {
         'rules': [
+          // 1. DNS
           {'protocol': 'dns', 'outbound': 'dns-out'},
+
+          // 2. Локальные адреса
           {
             'ip_cidr': [
+              '0.0.0.0/8',
               '127.0.0.0/8',
               '10.0.0.0/8',
               '172.16.0.0/12',
               '192.168.0.0/16',
               '100.64.0.0/10',
+              '169.254.0.0/16',
+              '240.0.0.0/4',
+              'fc00::/7',
+              'fe80::/10',
+              '::1/128',
             ],
             'outbound': 'direct',
           },
+
+          // 3. Яндекс IP
           {
             'ip_cidr': yandexIpRanges,
             'outbound': 'direct',
           },
+
+          // 4. RU домены
           {'domain_suffix': directDomains, 'outbound': 'direct'},
+
+          // 5. Торренты
           {'protocol': 'bittorrent', 'outbound': 'direct'},
         ],
         'final': 'proxy',
@@ -469,8 +490,9 @@ class _HomePageState extends State<HomePage>
 
       final currentTag = _vpn.servers
           .firstWhere((s) => s['name'] == _vpn.serverLocation, orElse: () => {})['tag'] as String?;
-      final selectedTag = serverList.any((s) => s['tag'] == currentTag)
-          ? currentTag! : outbounds.first['tag'] as String;
+      final selectedTag = (currentTag != null && serverList.any((s) => s['tag'] == currentTag))
+          ? currentTag
+          : outbounds.first['tag'] as String;
 
       final config = _buildSingboxConfig(outbounds, selectedTag);
       await _vpn.saveConfig(config);
@@ -504,12 +526,15 @@ class _HomePageState extends State<HomePage>
   Future<void> _toggleConnection() async {
     if (_isConnecting) return;
     if (_isConnected) { await _vpn.singbox.stopVPN(); return; }
+
+    // Если конфиг ещё грузится — показываем снэкбар, не блокируем навсегда
     if (_vpn.singboxConfig == null) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('Нет конфигурации VPN — проверьте соединение'),
           backgroundColor: AppColors.crimson));
       return;
     }
+
     setState(() { _isConnecting = true; _statusText = 'ПОДКЛЮЧЕНИЕ...'; });
     _connectController.forward();
     try {
@@ -599,6 +624,13 @@ class _HomePageState extends State<HomePage>
         const Text('END VPN', style: TextStyle(fontFamily: 'Rajdhani', fontSize: 20,
             fontWeight: FontWeight.w700, color: Colors.white, letterSpacing: 3)),
         const Spacer(),
+        // Индикатор загрузки данных
+        if (_isDataLoading)
+          const Padding(
+            padding: EdgeInsets.only(right: 8),
+            child: SizedBox(width: 14, height: 14,
+                child: CircularProgressIndicator(color: AppColors.neonBlue, strokeWidth: 1.5)),
+          ),
         GlassCard(
           borderRadius: 14, padding: const EdgeInsets.all(10),
           child: const Icon(Icons.notifications_none_rounded, color: AppColors.darkText, size: 20),
