@@ -232,7 +232,6 @@ class _WarpNavBar extends StatelessWidget {
   }
 }
 
-// Таб VPN с логотипом вместо иконки
 class _NavLogoItem extends StatelessWidget {
   final bool isSelected;
   final bool badge;

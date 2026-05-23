@@ -137,8 +137,6 @@ if (_userUuid != null) {
     // Запускаем таймер только после загрузки и только если есть пассив
     if (_passivePerSec > 0 && _isVisible) _startPassiveTimer();
   }
-
-  /// Дебаунс — реально пишет через 2 сек после последнего клика
   void _scheduleSave() {
     _saveDebounce?.cancel();
     _saveDebounce = Timer(const Duration(seconds: 2), _flushSave);
@@ -197,7 +195,6 @@ if (_userUuid != null) {
       ));
     });
 
-    // Дебаунс вместо немедленного сохранения
     _scheduleSave();
     _maybeSyncRemote();
 
@@ -223,7 +220,6 @@ if (_userUuid != null) {
       if (upgrade.multiplier != null) _perClick *= upgrade.multiplier!;
       if (upgrade.passive != null) {
         _passivePerSec += upgrade.passive!;
-        // Запускаем таймер если это первый пассив
         if (_passivePerSec > 0 && _isVisible) _startPassiveTimer();
       }
     });

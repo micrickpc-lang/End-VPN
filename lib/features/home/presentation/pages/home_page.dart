@@ -89,7 +89,7 @@ class _HomePageState extends State<HomePage>
 
   bool _isConnected  = false;
   bool _isConnecting = false;
-  bool _isDataLoading = true; // блокирует кнопку пока грузится конфиг
+  bool _isDataLoading = true;
   String _statusText    = 'ОТКЛЮЧЕНО';
   String _uploadSpeed   = '--';
   String _downloadSpeed = '--';
@@ -227,7 +227,6 @@ class _HomePageState extends State<HomePage>
   }
 
   Future<void> _loadData() async {
-    // Сначала пробуем кешированный конфиг — чтобы кнопка разблокировалась быстро
     await _vpn.loadCachedConfig();
     if (_vpn.singboxConfig != null && mounted) {
       setState(() => _isDataLoading = false);
@@ -252,11 +251,9 @@ class _HomePageState extends State<HomePage>
       }
     } catch (e) {
       debugPrint('Load data error: $e');
-      // Пробуем кешированный URL как фолбэк
       final cachedUrl = await _vpn.loadSubUrl();
       if (cachedUrl != null) await _fetchSubscription(cachedUrl);
     } finally {
-      // Гарантированно снимаем блокировку кнопки
       if (mounted) setState(() => _isDataLoading = false);
     }
   }
@@ -391,9 +388,6 @@ class _HomePageState extends State<HomePage>
           'address': ['172.19.0.1/30', 'fdfe:dcba:9876::1/126'],
           'mtu': 1500,
           'auto_route': true,
-          // ↓ ФИКС ERR_CONNECTION: system stack + strict_route=false — самая совместимая комбинация
-          // mixed+strict=false ломает браузеры; mixed+strict=true ломает некоторые приложения
-          // system+strict=false работает корректно на большинстве Android устройств
           'strict_route': false,
           'stack': 'system',
           'sniff': true,
@@ -526,8 +520,6 @@ class _HomePageState extends State<HomePage>
   Future<void> _toggleConnection() async {
     if (_isConnecting) return;
     if (_isConnected) { await _vpn.singbox.stopVPN(); return; }
-
-    // Если конфиг ещё грузится — показываем снэкбар, не блокируем навсегда
     if (_vpn.singboxConfig == null) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('Нет конфигурации VPN — проверьте соединение'),
