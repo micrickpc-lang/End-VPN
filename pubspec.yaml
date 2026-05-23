@@ -12,14 +12,14 @@ dependencies:
     sdk: flutter
   flutter_animate: ^4.5.0
   dio: ^5.4.3+1
-  flutter_secure_storage: ^9.2.2
-  device_info_plus: ^10.1.2
+  flutter_secure_storage: 10.2.0
+  device_info_plus: 12.4.0
   crypto: ^3.0.3
   logger: ^2.4.0
   intl: ^0.19.0
   url_launcher: ^6.3.0
   flutter_singbox_vpn: ^1.1.2
-  shared_preferences: ^2.3.2
+  shared_preferences: ^2.5.0
   app_links: ^6.3.4
   yaml: ^3.1.2
 
