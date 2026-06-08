@@ -10,6 +10,7 @@ import 'package:yaml/yaml.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:endvpn/core/services/remnawave_service.dart';
 import 'package:endvpn/core/services/vpn_tile_service.dart';
+import 'package:endvpn/core/services/ad_service.dart';
 import 'package:endvpn/core/models/user_model.dart';
 import 'package:endvpn/shared/theme/app_theme.dart';
 import 'package:endvpn/shared/widgets/glass_card.dart';
@@ -155,6 +156,7 @@ class _HomePageState extends State<HomePage>
         vsync: this, duration: const Duration(milliseconds: 600));
 
     _vpn.init();
+    AdService().init();
 
     VpnTileService.instance.init();
     VpnTileService.instance.onTileConnect    = () => _toggleConnection();
@@ -338,18 +340,10 @@ class _HomePageState extends State<HomePage>
     ];
 
     const yandexIpRanges = [
-      '5.45.192.0/18',
-      '5.255.192.0/18',
-      '37.9.64.0/18',
-      '37.140.128.0/18',
-      '77.88.0.0/18',
-      '84.201.128.0/18',
-      '87.250.224.0/19',
-      '93.158.128.0/18',
-      '95.108.128.0/17',
-      '141.8.128.0/18',
-      '178.154.128.0/18',
-      '213.180.192.0/18',
+      '5.45.192.0/18', '5.255.192.0/18', '37.9.64.0/18',
+      '37.140.128.0/18', '77.88.0.0/18', '84.201.128.0/18',
+      '87.250.224.0/19', '93.158.128.0/18', '95.108.128.0/17',
+      '141.8.128.0/18', '178.154.128.0/18', '213.180.192.0/18',
       '2a02:6b8::/32',
     ];
 
@@ -357,21 +351,9 @@ class _HomePageState extends State<HomePage>
       'log': {'level': 'warn', 'timestamp': false},
       'dns': {
         'servers': [
-          {
-            'tag': 'local',
-            'address': '223.5.5.5',
-            'detour': 'direct',
-          },
-          {
-            'tag': 'remote',
-            'address': 'https://1.1.1.1/dns-query',
-            'detour': selectedTag,
-          },
-          {
-            'tag': 'local-fallback',
-            'address': '8.8.4.4',
-            'detour': 'direct',
-          },
+          {'tag': 'local', 'address': '223.5.5.5', 'detour': 'direct'},
+          {'tag': 'remote', 'address': 'https://1.1.1.1/dns-query', 'detour': selectedTag},
+          {'tag': 'local-fallback', 'address': '8.8.4.4', 'detour': 'direct'},
         ],
         'rules': [
           {'domain_suffix': directDomains, 'server': 'local'},
@@ -383,16 +365,11 @@ class _HomePageState extends State<HomePage>
       },
       'inbounds': [
         {
-          'type': 'tun',
-          'tag': 'tun-in',
+          'type': 'tun', 'tag': 'tun-in',
           'address': ['172.19.0.1/30', 'fdfe:dcba:9876::1/126'],
-          'mtu': 1500,
-          'auto_route': true,
-          'strict_route': false,
-          'stack': 'system',
-          'sniff': true,
-          'sniff_override_destination': false,
-          'udp_timeout': '300s',
+          'mtu': 1500, 'auto_route': true, 'strict_route': false,
+          'stack': 'system', 'sniff': true,
+          'sniff_override_destination': false, 'udp_timeout': '300s',
         }
       ],
       'outbounds': [
@@ -401,45 +378,25 @@ class _HomePageState extends State<HomePage>
         {'type': 'block',  'tag': 'block'},
         {'type': 'dns',    'tag': 'dns-out'},
         {
-          'type': 'selector',
-          'tag': 'proxy',
+          'type': 'selector', 'tag': 'proxy',
           'outbounds': outbounds.map((o) => o['tag'] as String).toList(),
           'default': selectedTag,
         },
       ],
       'route': {
         'rules': [
-          // 1. DNS
           {'protocol': 'dns', 'outbound': 'dns-out'},
-
-          // 2. Локальные адреса
           {
             'ip_cidr': [
-              '0.0.0.0/8',
-              '127.0.0.0/8',
-              '10.0.0.0/8',
-              '172.16.0.0/12',
-              '192.168.0.0/16',
-              '100.64.0.0/10',
-              '169.254.0.0/16',
-              '240.0.0.0/4',
-              'fc00::/7',
-              'fe80::/10',
-              '::1/128',
+              '0.0.0.0/8', '127.0.0.0/8', '10.0.0.0/8',
+              '172.16.0.0/12', '192.168.0.0/16', '100.64.0.0/10',
+              '169.254.0.0/16', '240.0.0.0/4', 'fc00::/7',
+              'fe80::/10', '::1/128',
             ],
             'outbound': 'direct',
           },
-
-          // 3. Яндекс IP
-          {
-            'ip_cidr': yandexIpRanges,
-            'outbound': 'direct',
-          },
-
-          // 4. RU домены
+          {'ip_cidr': yandexIpRanges, 'outbound': 'direct'},
           {'domain_suffix': directDomains, 'outbound': 'direct'},
-
-          // 5. Торренты
           {'protocol': 'bittorrent', 'outbound': 'direct'},
         ],
         'final': 'proxy',
@@ -505,26 +462,45 @@ class _HomePageState extends State<HomePage>
     }
   }
 
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _pingTimer?.cancel();
-    _trafficDebounce?.cancel();
-    _statusSub?.cancel();
-    _trafficSub?.cancel();
-    _pulseController.dispose();
-    _connectController.dispose();
-    super.dispose();
+Future<bool> _checkIsPremium() async {
+  try {
+    final tgIdStr = await RemnawaveService().getSavedTgId();
+    UserModel user;
+    if (tgIdStr != null) {
+      user = await RemnawaveService().getOrCreateUserByTgId(int.parse(tgIdStr));
+    } else {
+      user = await RemnawaveService().getOrCreateAnonUser();
+    }
+    return user.subscriptionType == 'paid';
+  } catch (e) {
+    debugPrint('checkIsPremium error: $e');
+    return true; // При ошибке считаем премиум — лучше не показать рекламу, чем показать платнику
   }
+}
 
   Future<void> _toggleConnection() async {
     if (_isConnecting) return;
-    if (_isConnected) { await _vpn.singbox.stopVPN(); return; }
+
+    if (_isConnected) {
+      final isPremium = await _checkIsPremium();
+      if (!isPremium) {
+        await AdService().showRewardedAd(context);
+      }
+      await _vpn.singbox.stopVPN();
+      return;
+    }
+
     if (_vpn.singboxConfig == null) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('Нет конфигурации VPN — проверьте соединение'),
           backgroundColor: AppColors.crimson));
       return;
+    }
+
+    final isPremium = await _checkIsPremium();
+    if (!isPremium) {
+      final watched = await AdService().showRewardedAd(context);
+      if (!watched) return;
     }
 
     setState(() { _isConnecting = true; _statusText = 'ПОДКЛЮЧЕНИЕ...'; });
@@ -578,6 +554,18 @@ class _HomePageState extends State<HomePage>
   }
 
   @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _pingTimer?.cancel();
+    _trafficDebounce?.cancel();
+    _statusSub?.cancel();
+    _trafficSub?.cancel();
+    _pulseController.dispose();
+    _connectController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
     return Scaffold(
@@ -616,7 +604,6 @@ class _HomePageState extends State<HomePage>
         const Text('END VPN', style: TextStyle(fontFamily: 'Rajdhani', fontSize: 20,
             fontWeight: FontWeight.w700, color: Colors.white, letterSpacing: 3)),
         const Spacer(),
-        // Индикатор загрузки данных
         if (_isDataLoading)
           const Padding(
             padding: EdgeInsets.only(right: 8),

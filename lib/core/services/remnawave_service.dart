@@ -431,10 +431,8 @@ class RemnawaveService {
     await _storage.delete(key: _keySubUrl);
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_spKeyUuid);
-    // Анонимный UUID не трогаем
   }
 
-  /// Полный сброс — для дебага
   Future<void> clearAll() async {
     await _storage.deleteAll();
     final prefs = await SharedPreferences.getInstance();
