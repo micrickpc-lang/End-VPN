@@ -474,7 +474,7 @@ Future<bool> _checkIsPremium() async {
     return user.subscriptionType == 'paid';
   } catch (e) {
     debugPrint('checkIsPremium error: $e');
-    return true; // При ошибке считаем премиум — лучше не показать рекламу, чем показать платнику
+    return true;
   }
 }
 
