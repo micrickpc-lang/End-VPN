@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:yandex_mobileads/mobile_ads.dart';
 
@@ -14,6 +15,7 @@ class AdService {
   bool _isLoaded = false;
 
   Future<void> init() async {
+    if (!Platform.isAndroid && !Platform.isIOS) return;
     await MobileAds.initialize();
     await _createLoader();
     await _loadAd();
@@ -42,9 +44,18 @@ class AdService {
   }
 
   Future<bool> showRewardedAd(BuildContext context) async {
+    if (!Platform.isAndroid && !Platform.isIOS) return true;
     if (!_isLoaded || _rewardedAd == null) {
-      _loadAd();
-      return true;
+      await _loadAd();
+      if (!_isLoaded || _rewardedAd == null) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text(
+                'Реклама пока не загрузилась. Проверьте интернет и попробуйте ещё раз.'),
+          ));
+        }
+        return false;
+      }
     }
 
     final completer = Completer<bool>();
@@ -59,7 +70,7 @@ class AdService {
           _loadAd();
         },
         onAdFailedToShow: (AdError error) {
-          if (!completer.isCompleted) completer.complete(true);
+          if (!completer.isCompleted) completer.complete(false);
           _isLoaded = false;
           _rewardedAd = null;
           _loadAd();
@@ -76,7 +87,7 @@ class AdService {
       await _rewardedAd!.show();
     } catch (e) {
       debugPrint('Ad show error: $e');
-      if (!completer.isCompleted) completer.complete(true);
+      if (!completer.isCompleted) completer.complete(false);
     }
 
     return completer.future;

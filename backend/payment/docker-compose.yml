@@ -1,0 +1,15 @@
+services:
+  endvpn-payment:
+    build: .
+    container_name: endvpn-payment
+    restart: always
+    env_file:
+      - .env
+    volumes:
+      - ./data:/data
+    networks:
+      - remnawave-network
+
+networks:
+  remnawave-network:
+    external: true

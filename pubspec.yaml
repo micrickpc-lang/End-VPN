@@ -1,7 +1,7 @@
 name: endvpn
 description: End VPN - Premium VPN client
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.1.0+2
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -12,17 +12,25 @@ dependencies:
     sdk: flutter
   flutter_animate: ^4.5.0
   dio: ^5.4.3+1
-  flutter_secure_storage: 10.2.0
-  device_info_plus: 12.4.0
+  flutter_secure_storage: ^10.3.1
+  device_info_plus: ^13.2.0
   crypto: ^3.0.3
   logger: ^2.4.0
-  intl: ^0.19.0
+  intl: ^0.20.3
   url_launcher: ^6.3.0
   flutter_singbox_vpn: ^1.1.2
   shared_preferences: ^2.5.0
-  app_links: ^6.3.4
+  app_links: ^7.2.1
   yaml: ^3.1.2
-  yandex_mobileads: ^7.5.0
+  yandex_mobileads: 7.18.0
+
+dependency_overrides:
+  flutter_singbox_vpn:
+    path: packages/flutter_singbox_vpn
+  shared_preferences_android:
+    path: packages/shared_preferences_android
+  yandex_mobileads:
+    path: packages/yandex_mobileads
 
 dev_dependencies:
   flutter_test:
@@ -47,3 +55,4 @@ flutter:
         - asset: assets/fonts/SpaceMono-Regular.ttf
         - asset: assets/fonts/SpaceMono-Bold.ttf
           weight: 700
+

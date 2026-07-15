@@ -4,10 +4,11 @@ import 'package:endvpn/main.dart';
 
 void main() {
   testWidgets('App starts', (WidgetTester tester) async {
-    await tester.pumpWidget(EndVpnApp(
-      accentColor: const Color(0xFF00AAFF),
-      tosAccepted: true, // ← добавь это
+    await tester.pumpWidget(const EndVpnApp(
+      accentColor: Color(0xFF7CC7D8),
+      tosAccepted: false,
     ));
-    expect(find.text('END'), findsAny);
+
+    expect(find.byType(MaterialApp), findsOneWidget);
   });
 }

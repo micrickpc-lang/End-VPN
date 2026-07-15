@@ -2,7 +2,9 @@
 
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.BIND_QUICK_SETTINGS_TILE" />
 
     <application
         android:label="End VPN"
@@ -27,22 +29,45 @@
             </intent-filter>
         </activity>
 
-        <!-- Уведомление VPN -->
         <service
             android:name=".VpnNotificationService"
             android:exported="false"
             android:foregroundServiceType="specialUse" />
 
-        <!-- Слушатель статуса sing-box → запускает/останавливает уведомление -->
+        <service
+            android:name=".XrayVpnService"
+            android:process=":xray"
+            android:exported="false"
+            android:permission="android.permission.BIND_VPN_SERVICE"
+            android:foregroundServiceType="systemExempted">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".VpnQuickTileService"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:label="EndVPN"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+                android:value="true" />
+        </service>
+
         <receiver
             android:name=".VpnStatusReceiver"
             android:exported="true">
             <intent-filter>
                 <action android:name="io.nekohasekai.sfa.STATUS_CHANGED" />
+                <action android:name="com.example.endvpn.XRAY_STATUS" />
             </intent-filter>
         </receiver>
 
-        <!-- Слушатель кнопки "Отключить" в уведомлении -->
         <receiver
             android:name=".VpnBroadcastReceiver"
             android:exported="false">
@@ -57,6 +82,18 @@
     </application>
 
     <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="http" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="tg" />
+        </intent>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>

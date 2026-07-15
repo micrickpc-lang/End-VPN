@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -24,29 +23,47 @@ class _ClickerPageState extends State<ClickerPage>
   final List<_FloatingText> _floatingTexts = [];
   late final AnimationController _shieldPulse;
   bool _loaded = false;
-  bool _isVisible = true; // страница видима?
+  bool _isVisible = true;
 
   String? _userUuid;
   int _unsyncedClicks = 0;
   static const _syncThreshold = 50;
 
-  // Таймер пассивного дохода — только когда страница видима
   Timer? _passiveTimer;
 
-  // Дебаунс для сохранения — не пишем на каждый клик
   Timer? _saveDebounce;
-  SharedPreferences? _prefs; // кешируем экземпляр
+  SharedPreferences? _prefs;
 
-  static const _keyCoins     = 'clicker_coins';
-  static const _keyPerClick  = 'clicker_per_click';
-  static const _keyPassive   = 'clicker_passive';
+  static const _keyCoins = 'clicker_coins';
+  static const _keyPerClick = 'clicker_per_click';
+  static const _keyPassive = 'clicker_passive';
   static const _keyPurchased = 'clicker_purchased';
 
   final List<_Upgrade> _upgrades = [
-    _Upgrade(id: 'double',   label: '×2 за клик', cost: 50,  icon: Icons.bolt_rounded,         multiplier: 2),
-    _Upgrade(id: 'passive1', label: '+1/сек',      cost: 100, icon: Icons.auto_awesome_rounded, passive: 1),
-    _Upgrade(id: 'triple',   label: '×3 за клик',  cost: 200, icon: Icons.flash_on_rounded,     multiplier: 3),
-    _Upgrade(id: 'passive5', label: '+5/сек',       cost: 500, icon: Icons.speed_rounded,        passive: 5),
+    const _Upgrade(
+        id: 'double',
+        label: '×2 за клик',
+        cost: 50,
+        icon: Icons.bolt_rounded,
+        multiplier: 2),
+    const _Upgrade(
+        id: 'passive1',
+        label: '+1/сек',
+        cost: 100,
+        icon: Icons.auto_awesome_rounded,
+        passive: 1),
+    const _Upgrade(
+        id: 'triple',
+        label: '×3 за клик',
+        cost: 200,
+        icon: Icons.flash_on_rounded,
+        multiplier: 3),
+    const _Upgrade(
+        id: 'passive5',
+        label: '+5/сек',
+        cost: 500,
+        icon: Icons.speed_rounded,
+        passive: 5),
   ];
   final Set<String> _purchased = {};
 
@@ -55,7 +72,6 @@ class _ClickerPageState extends State<ClickerPage>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    // Пульс щита — замедлен до 3с вместо 2с (меньше кадров)
     _shieldPulse = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 3),
@@ -64,13 +80,12 @@ class _ClickerPageState extends State<ClickerPage>
     _loadState();
   }
 
-  // Останавливаем таймер когда приложение уходит в фон
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive) {
       _stopPassiveTimer();
-      _flushSave(); // сохраняем всё накопленное
+      _flushSave();
     } else if (state == AppLifecycleState.resumed && _isVisible) {
       _startPassiveTimer();
     }
@@ -95,7 +110,6 @@ class _ClickerPageState extends State<ClickerPage>
     _passiveTimer = null;
   }
 
-  // Вызывается из AppShell когда вкладка меняется
   void setVisible(bool visible) {
     _isVisible = visible;
     if (visible) {
@@ -112,37 +126,36 @@ class _ClickerPageState extends State<ClickerPage>
 
     _userUuid = await RemnawaveService().getSavedUuid();
 
-final localCoins = _prefs!.getInt(_keyCoins) ?? 0;
-int remoteCoins = localCoins;
-if (_userUuid != null) {
-  try {
-    final fetched = await RemnawaveService().getClickerBalance(_userUuid!);
-    remoteCoins = fetched > localCoins ? fetched : localCoins;
-  } catch (_) {
-    remoteCoins = localCoins;
-  }
-}
+    final localCoins = _prefs!.getInt(_keyCoins) ?? 0;
+    int remoteCoins = localCoins;
+    if (_userUuid != null) {
+      try {
+        final fetched = await RemnawaveService().getClickerBalance(_userUuid!);
+        remoteCoins = fetched > localCoins ? fetched : localCoins;
+      } catch (_) {
+        remoteCoins = localCoins;
+      }
+    }
 
     if (!mounted) return;
     setState(() {
-      _coins        = remoteCoins;
-      _perClick     = _prefs!.getInt(_keyPerClick) ?? 1;
+      _coins = remoteCoins;
+      _perClick = _prefs!.getInt(_keyPerClick) ?? 1;
       _passivePerSec = _prefs!.getInt(_keyPassive) ?? 0;
       _purchased.addAll(purchasedList);
-      _loaded       = true;
+      _loaded = true;
     });
 
     await _prefs!.setInt(_keyCoins, _coins);
 
-    // Запускаем таймер только после загрузки и только если есть пассив
     if (_passivePerSec > 0 && _isVisible) _startPassiveTimer();
   }
+
   void _scheduleSave() {
     _saveDebounce?.cancel();
     _saveDebounce = Timer(const Duration(seconds: 2), _flushSave);
   }
 
-  /// Реальная запись в SharedPreferences (один раз вместо на каждый клик)
   Future<void> _flushSave() async {
     if (_prefs == null) return;
     await Future.wait([
@@ -231,25 +244,28 @@ if (_userUuid != null) {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.darkBg,
-      body: Stack(
-        children: [
-          if (!_loaded)
-            const Center(child: CircularProgressIndicator(color: AppColors.neonBlue))
-          else
-            SafeArea(
-              child: Column(
-                children: [
-                  _buildHeader(),
-                  const SizedBox(height: 8),
-                  _buildStatsBar(),
-                  const SizedBox(height: 24),
-                  Expanded(child: _buildClickZone()),
-                  _buildUpgrades(),
-                  const SizedBox(height: 24),
-                ],
+      body: LiquidBackground(
+        child: Stack(
+          children: [
+            if (!_loaded)
+              const Center(
+                  child: CircularProgressIndicator(color: AppColors.neonBlue))
+            else
+              SafeArea(
+                child: Column(
+                  children: [
+                    _buildHeader(),
+                    const SizedBox(height: 8),
+                    _buildStatsBar(),
+                    const SizedBox(height: 24),
+                    Expanded(child: _buildClickZone()),
+                    _buildUpgrades(),
+                    const SizedBox(height: 24),
+                  ],
+                ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -294,7 +310,10 @@ if (_userUuid != null) {
       padding: const EdgeInsets.symmetric(horizontal: 24),
       child: Row(
         children: [
-          _MiniStat(label: 'ЗА КЛИК', value: '×$_perClick', color: AppColors.neonBlue),
+          _MiniStat(
+              label: 'ЗА КЛИК',
+              value: '×$_perClick',
+              color: AppColors.neonBlue),
           const SizedBox(width: 12),
           _MiniStat(
               label: 'В СЕК',
@@ -306,55 +325,58 @@ if (_userUuid != null) {
   }
 
   Widget _buildClickZone() {
-    return GestureDetector(
-      onTapDown: _onTap,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          ..._floatingTexts.map((ft) => _FloatingTextWidget(ft: ft)),
-          AnimatedScale(
-            scale: _buttonScale,
-            duration: const Duration(milliseconds: 80),
-            child: AnimatedBuilder(
-              animation: _shieldPulse,
-              builder: (_, __) => Container(
-                width: 200,
-                height: 200,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  // Убран BackdropFilter — заменён на простой градиент
-                  gradient: RadialGradient(colors: [
-                    AppColors.neonBlue.withOpacity(0.18 + _shieldPulse.value * 0.1),
-                    AppColors.neonBlue.withOpacity(0.03),
-                  ]),
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppColors.neonBlue
-                          .withOpacity(0.25 + _shieldPulse.value * 0.15),
-                      blurRadius: 45 + _shieldPulse.value * 15,
+    return RepaintBoundary(
+      child: GestureDetector(
+        onTapDown: _onTap,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            ..._floatingTexts.map((ft) => _FloatingTextWidget(ft: ft)),
+            AnimatedScale(
+              scale: _buttonScale,
+              duration: const Duration(milliseconds: 80),
+              child: AnimatedBuilder(
+                animation: _shieldPulse,
+                builder: (_, __) => Container(
+                  width: 200,
+                  height: 200,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(colors: [
+                      Colors.white.withValues(alpha: 0.24),
+                      AppColors.neonBlue
+                          .withValues(alpha: 0.10 + _shieldPulse.value * 0.05),
+                      Colors.white.withValues(alpha: 0.04),
+                    ]),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.26),
+                        blurRadius: 36 + _shieldPulse.value * 8,
+                        offset: const Offset(0, 18),
+                      ),
+                    ],
+                    border: Border.all(
+                      color: Colors.white
+                          .withValues(alpha: 0.20 + _shieldPulse.value * 0.06),
+                      width: 1,
                     ),
-                  ],
-                  border: Border.all(
-                    color: AppColors.neonBlue
-                        .withOpacity(0.35 + _shieldPulse.value * 0.2),
-                    width: 2,
                   ),
+                  child: const Icon(Icons.shield_rounded,
+                      size: 90, color: AppColors.neonBlue),
                 ),
-                child: const Icon(Icons.shield_rounded,
-                    size: 90, color: AppColors.neonBlue),
               ),
             ),
-          ),
-          Positioned(
-            bottom: 40,
-            child: Text('ТАП ЧТОБЫ ДОБЫТЬ МОНЕТЫ',
-                style: TextStyle(
-                    fontFamily: 'SpaceMono',
-                    fontSize: 10,
-                    color: AppColors.darkTextSub.withOpacity(0.6),
-                    letterSpacing: 2)),
-          ),
-        ],
+            Positioned(
+              bottom: 40,
+              child: Text('ТАП ЧТОБЫ ДОБЫТЬ МОНЕТЫ',
+                  style: TextStyle(
+                      fontFamily: 'SpaceMono',
+                      fontSize: 10,
+                      color: AppColors.darkTextSub.withValues(alpha: 0.6),
+                      letterSpacing: 2)),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -388,9 +410,9 @@ if (_userUuid != null) {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 10, vertical: 12),
                       borderColor: bought
-                          ? AppColors.connected.withOpacity(0.4)
+                          ? AppColors.connected.withValues(alpha: 0.4)
                           : canAfford
-                              ? AppColors.neonBlue.withOpacity(0.3)
+                              ? AppColors.neonBlue.withValues(alpha: 0.3)
                               : null,
                       child: Column(children: [
                         Icon(u.icon,
@@ -439,8 +461,6 @@ if (_userUuid != null) {
   }
 }
 
-// ─── Вспомогательные классы ──────────────────────────────────────────────────
-
 class _Upgrade {
   final String id;
   final String label;
@@ -462,7 +482,8 @@ class _FloatingText {
   final String value;
   final Offset position;
   final Key id;
-  const _FloatingText({required this.value, required this.position, required this.id});
+  const _FloatingText(
+      {required this.value, required this.position, required this.id});
 }
 
 class _FloatingTextWidget extends StatefulWidget {
@@ -525,7 +546,8 @@ class _MiniStat extends StatelessWidget {
   final String label;
   final String value;
   final Color color;
-  const _MiniStat({required this.label, required this.value, required this.color});
+  const _MiniStat(
+      {required this.label, required this.value, required this.color});
 
   @override
   Widget build(BuildContext context) {

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:endvpn/shared/theme/app_theme.dart';
+import 'package:endvpn/shared/widgets/glass_card.dart';
 
 class AuthPage extends StatefulWidget {
   final VoidCallback onAccepted;
@@ -13,7 +14,8 @@ class AuthPage extends StatefulWidget {
   State<AuthPage> createState() => _AuthPageState();
 }
 
-class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin {
+class _AuthPageState extends State<AuthPage>
+    with SingleTickerProviderStateMixin {
   bool _accepted = false;
   bool _loading = false;
   late AnimationController _pulse;
@@ -42,99 +44,50 @@ class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin
   }
 
   Future<void> _openOferta() async {
-    final uri = Uri.parse('https://telegra.ph/PUBLICHNAYA-OFERTA-End-VPN-04-17');
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    }
+    final uri =
+        Uri.parse('https://telegra.ph/PUBLICHNAYA-OFERTA-End-VPN-04-17');
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.darkBg,
-      body: Stack(
-        children: [
-          // Background glow
-          Positioned(
-            top: -100,
-            left: -80,
-            child: AnimatedBuilder(
-              animation: _pulse,
-              builder: (_, __) => Container(
-                width: 350,
-                height: 350,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: RadialGradient(
-                    colors: [
-                      AppColors.neonBlue.withOpacity(0.08 + _pulse.value * 0.04),
-                      Colors.transparent,
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-          Positioned(
-            bottom: -120,
-            right: -60,
-            child: AnimatedBuilder(
-              animation: _pulse,
-              builder: (_, __) => Container(
-                width: 300,
-                height: 300,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: RadialGradient(
-                    colors: [
-                      const Color(0xFFAA44FF).withOpacity(0.06 + _pulse.value * 0.03),
-                      Colors.transparent,
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-
-          SafeArea(
-            child: Center(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    // Logo
-                    _buildLogo(),
-                    const SizedBox(height: 32),
-
-                    // Title
-                    const Text(
-                      'Вход в аккаунт',
-                      style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white,
-                        letterSpacing: 0.3,
+      body: LiquidBackground(
+        child: Stack(
+          children: [
+            SafeArea(
+              child: Center(
+                child: SingleChildScrollView(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _buildLogo(),
+                      const SizedBox(height: 32),
+                      const Text(
+                        'Вход в аккаунт',
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
+                          letterSpacing: 0.3,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 28),
-
-                    // ToS Box
-                    _buildTosBox(),
-                    const SizedBox(height: 20),
-
-                    // Checkbox
-                    _buildCheckbox(),
-                    const SizedBox(height: 28),
-
-                    // Button
-                    _buildButton(),
-                  ],
+                      const SizedBox(height: 28),
+                      _buildTosBox(),
+                      const SizedBox(height: 20),
+                      _buildCheckbox(),
+                      const SizedBox(height: 28),
+                      _buildButton(),
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -147,16 +100,13 @@ class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin
         height: 72,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          gradient: const LinearGradient(
-            colors: [Color(0xFF7B4FFF), Color(0xFFFF4B8B)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
+          color: Colors.white.withValues(alpha: 0.12),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
           boxShadow: [
             BoxShadow(
-              color: const Color(0xFF7B4FFF).withOpacity(0.3 + _pulse.value * 0.15),
-              blurRadius: 24,
-              spreadRadius: 2,
+              color: Colors.black.withValues(alpha: 0.24),
+              blurRadius: 22,
+              offset: const Offset(0, 12),
             ),
           ],
         ),
@@ -177,15 +127,15 @@ class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin
         child: Container(
           height: 220,
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.04),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.white.withOpacity(0.08)),
+            color: Colors.white.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
           ),
-          child: Column(
+          child: const Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+                padding: EdgeInsets.fromLTRB(16, 14, 16, 10),
                 child: Text(
                   'УСЛОВИЯ ИСПОЛЬЗОВАНИЯ',
                   style: TextStyle(
@@ -198,10 +148,10 @@ class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin
               ),
               Expanded(
                 child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  padding: EdgeInsets.fromLTRB(16, 0, 16, 16),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: const [
+                    children: [
                       _TosSection(
                         title: '1. Согласие с условиями',
                         body:
@@ -273,16 +223,20 @@ class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(6),
               color: _accepted
-                  ? const Color(0xFF7B4FFF)
-                  : Colors.white.withOpacity(0.06),
+                  ? AppColors.neonBlue
+                  : Colors.white.withValues(alpha: 0.06),
               border: Border.all(
                 color: _accepted
-                    ? const Color(0xFF7B4FFF)
-                    : Colors.white.withOpacity(0.2),
+                    ? AppColors.neonBlue
+                    : Colors.white.withValues(alpha: 0.2),
                 width: 1.5,
               ),
               boxShadow: _accepted
-                  ? [BoxShadow(color: const Color(0xFF7B4FFF).withOpacity(0.4), blurRadius: 8)]
+                  ? [
+                      BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.18),
+                          blurRadius: 8)
+                    ]
                   : null,
             ),
             child: _accepted
@@ -299,13 +253,15 @@ class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin
                   height: 1.4,
                 ),
                 children: [
-                  const TextSpan(text: 'Я прочитал(а) и принимаю условия использования и '),
+                  const TextSpan(
+                      text:
+                          'Я прочитал(а) и принимаю условия использования и '),
                   TextSpan(
                     text: 'оферту',
                     style: const TextStyle(
-                      color: Color(0xFF7B4FFF),
+                      color: AppColors.neonBlue,
                       decoration: TextDecoration.underline,
-                      decorationColor: Color(0xFF7B4FFF),
+                      decorationColor: AppColors.neonBlue,
                     ),
                     recognizer: TapGestureRecognizer()..onTap = _openOferta,
                   ),
@@ -328,14 +284,15 @@ class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin
           width: double.infinity,
           height: 52,
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            gradient: const LinearGradient(
-              colors: [Color(0xFF7B4FFF), Color(0xFFFF4B8B)],
-              begin: Alignment.centerLeft,
-              end: Alignment.centerRight,
-            ),
+            borderRadius: BorderRadius.circular(24),
+            color: AppColors.neonBlue.withValues(alpha: 0.82),
             boxShadow: _accepted
-                ? [BoxShadow(color: const Color(0xFF7B4FFF).withOpacity(0.4), blurRadius: 16, offset: const Offset(0, 4))]
+                ? [
+                    BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.24),
+                        blurRadius: 20,
+                        offset: const Offset(0, 10))
+                  ]
                 : null,
           ),
           child: Center(
@@ -343,7 +300,8 @@ class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin
                 ? const SizedBox(
                     width: 22,
                     height: 22,
-                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                    child: CircularProgressIndicator(
+                        color: Colors.white, strokeWidth: 2),
                   )
                 : const Text(
                     'Продолжить',

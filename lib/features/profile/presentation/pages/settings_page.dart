@@ -11,8 +11,8 @@ class SettingsPage extends StatelessWidget {
     AppColors.crimson,
     AppColors.connected,
     AppColors.warning,
-    Color(0xFFAA44FF),
-    Color(0xFFFF6600),
+    Color(0xFFB4A7D6),
+    Color(0xFFD8B27C),
   ];
 
   @override
@@ -24,55 +24,90 @@ class SettingsPage extends StatelessWidget {
       backgroundColor: AppColors.darkBg,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_rounded, color: AppColors.darkText, size: 20),
+          icon: const Icon(Icons.arrow_back_ios_rounded,
+              color: AppColors.darkText, size: 20),
           onPressed: () => Navigator.pop(context),
         ),
         title: const Text(
-          'НАСТРОЙКИ',
-          style: TextStyle(fontFamily: 'SpaceMono', fontSize: 13, letterSpacing: 2, color: AppColors.darkText),
+          'SETTINGS',
+          style: TextStyle(
+            fontFamily: 'SpaceMono',
+            fontSize: 12,
+            letterSpacing: 2,
+            color: AppColors.darkText,
+          ),
         ),
       ),
-      body: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+      body: LiquidBackground(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(24, 16, 24, 28),
           children: [
-            const SizedBox(height: 16),
             GlassCard(
+              blur: 18,
               padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('АКЦЕНТ', style: TextStyle(fontFamily: 'SpaceMono', fontSize: 10, color: AppColors.darkTextSub, letterSpacing: 2)),
-                  const SizedBox(height: 16),
-                  StatefulBuilder(builder: (ctx, setSt) {
-                    return Row(
+              child: StatefulBuilder(builder: (ctx, setSt) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'ACCENT',
+                      style: TextStyle(
+                        fontFamily: 'SpaceMono',
+                        fontSize: 10,
+                        color: AppColors.darkTextSub,
+                        letterSpacing: 2,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
                       children: _accentColors.map((c) {
                         final selected = app.accentColor == c;
-                        return Padding(
-                          padding: const EdgeInsets.only(right: 12),
-                          child: GestureDetector(
-                            onTap: () { app.setAccentColor(c); setSt(() {}); },
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 200),
-                              width: 36, height: 36,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: c,
-                                border: Border.all(color: selected ? Colors.white : Colors.transparent, width: 2.5),
-                                boxShadow: selected ? [BoxShadow(color: c.withOpacity(0.6), blurRadius: 12)] : null,
+                        return GestureDetector(
+                          onTap: () async {
+                            await app.setAccentColor(c);
+                            setSt(() {});
+                          },
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 160),
+                            curve: Curves.easeOutCubic,
+                            width: 38,
+                            height: 38,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: c,
+                              border: Border.all(
+                                color: selected
+                                    ? Colors.white.withValues(alpha: 0.9)
+                                    : Colors.white.withValues(alpha: 0.22),
+                                width: selected ? 2.5 : 1,
                               ),
-                              child: selected ? const Icon(Icons.check_rounded, color: Colors.white, size: 18) : null,
+                              boxShadow: selected
+                                  ? [
+                                      BoxShadow(
+                                        color: Colors.black
+                                            .withValues(alpha: 0.20),
+                                        blurRadius: 12,
+                                        offset: const Offset(0, 7),
+                                      )
+                                    ]
+                                  : null,
                             ),
+                            child: selected
+                                ? const Icon(Icons.check_rounded,
+                                    color: Colors.white, size: 18)
+                                : null,
                           ),
                         );
                       }).toList(),
-                    );
-                  }),
-                ],
-              ),
+                    ),
+                  ],
+                );
+              }),
             ),
           ],
         ),

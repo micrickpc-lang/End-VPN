@@ -1,35 +1,31 @@
 import 'package:flutter/material.dart';
 
 class AppColors {
-  // Brand colors from logo
-  static const neonBlue = Color(0xFF00AAFF);
-  static const crimson = Color(0xFFCC1144);
-  static const deepDark = Color(0xFF0A0A0F);
+  static const neonBlue = Color(0xFF91DDF0);
+  static const crimson = Color(0xFFFF8EA0);
+  static const deepDark = Color(0xFF111111);
 
-  // Dark theme
-  static const darkBg = Color(0xFF080810);
-  static const darkSurface = Color(0xFF0F0F1A);
-  static const darkCard = Color(0xFF141425);
-  static const darkBorder = Color(0xFF1E1E35);
-  static const darkText = Color(0xFFE8EAFF);
-  static const darkTextSub = Color(0xFF7B7D9E);
+  static const darkBg = Color(0xFF101112);
+  static const darkSurface = Color(0xFF171819);
+  static const darkCard = Color(0xFF1D1E20);
+  static const darkBorder = Color(0x2EFFFFFF);
+  static const darkText = Color(0xFFFFFFFF);
+  static const darkTextSub = Color(0xFFD8D4CA);
 
-  // Light theme
   static const lightBg = Color(0xFFF0F4FF);
   static const lightSurface = Color(0xFFFFFFFF);
   static const lightCard = Color(0xFFFAFBFF);
   static const lightBorder = Color(0xFFDDE2F5);
-  static const lightText = Color(0xFF0A0A1F);
-  static const lightTextSub = Color(0xFF6B6E8A);
+  static const lightText = Color(0xFF060711);
+  static const lightTextSub = Color(0xFF303345);
 
-  // Semantic
-  static const connected = Color(0xFF00E5A0);
-  static const disconnected = Color(0xFFFF4466);
-  static const warning = Color(0xFFFFAA00);
+  static const connected = Color(0xFF20D66B);
+  static const disconnected = Color(0xFFFF7C8B);
+  static const warning = Color(0xFFFFCA66);
 
-  // Glass
-  static Color glassWhite(double opacity) => Colors.white.withOpacity(opacity);
-  static Color glassBlue(double opacity) => neonBlue.withOpacity(opacity);
+  static Color glassWhite(double opacity) =>
+      Colors.white.withValues(alpha: opacity);
+  static Color glassBlue(double opacity) => neonBlue.withValues(alpha: opacity);
 }
 
 class AppTheme {
@@ -42,7 +38,6 @@ class AppTheme {
         primary: AppColors.neonBlue,
         secondary: AppColors.crimson,
         surface: AppColors.darkSurface,
-        background: AppColors.darkBg,
         onPrimary: Colors.white,
         onSurface: AppColors.darkText,
       ),
@@ -61,7 +56,6 @@ class AppTheme {
         primary: AppColors.neonBlue,
         secondary: AppColors.crimson,
         surface: AppColors.lightSurface,
-        background: AppColors.lightBg,
         onPrimary: Colors.white,
         onSurface: AppColors.lightText,
       ),
@@ -77,14 +71,14 @@ class AppTheme {
         fontSize: 56,
         fontWeight: FontWeight.w700,
         color: primary,
-        letterSpacing: -1,
+        letterSpacing: 0,
         fontFamily: 'Rajdhani',
       ),
       displayMedium: TextStyle(
         fontSize: 40,
         fontWeight: FontWeight.w700,
         color: primary,
-        letterSpacing: -0.5,
+        letterSpacing: 0,
       ),
       headlineLarge: TextStyle(
         fontSize: 28,

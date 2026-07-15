@@ -4,3 +4,4 @@ object VpnBridge {
     var isConnected: Boolean = false
     var serverName: String = ""
 }
+

@@ -66,9 +66,13 @@ class VpnNotificationService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun buildNotification(server: String): Notification {
+        val serverLabel = serverLabel(server)
         val openIntent = PendingIntent.getActivity(
             this, 0,
-            packageManager.getLaunchIntentForPackage(packageName),
+            Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP
+            },
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         val disconnectIntent = PendingIntent.getBroadcast(
@@ -78,8 +82,8 @@ class VpnNotificationService : Service() {
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_lock_lock)
-            .setContentTitle("EndVPN подключён")
-            .setContentText(if (server.isNotEmpty()) "Сервер: $server" else "Соединение активно")
+            .setContentTitle("END VPN подключён")
+            .setContentText(if (server.isNotEmpty()) "Сервер: $serverLabel" else "Соединение активно")
             .setOngoing(true)
             .setShowWhen(false)
             .setContentIntent(openIntent)
@@ -89,18 +93,32 @@ class VpnNotificationService : Service() {
             .build()
     }
 
+    private fun serverLabel(server: String): String {
+        if (server.isBlank()) return server
+        if (server.any { Character.getType(it) == Character.SURROGATE.toInt() }) return server
+        val normalized = server.lowercase()
+        val flag = when {
+            "нидерланд" in normalized || "netherland" in normalized || normalized.startsWith("nl") -> "🇳🇱"
+            "герман" in normalized || "german" in normalized || normalized.startsWith("de") -> "🇩🇪"
+            "литва" in normalized || "lithuan" in normalized || normalized.startsWith("lt") -> "🇱🇹"
+            "латви" in normalized || "latvia" in normalized || normalized.startsWith("lv") -> "🇱🇻"
+            "финлянд" in normalized || "finland" in normalized || normalized.startsWith("fi") -> "🇫🇮"
+            "сша" in normalized || "united states" in normalized || normalized.startsWith("us") -> "🇺🇸"
+            else -> "🌐"
+        }
+        return "$flag $server"
+    }
+
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val nm = getSystemService(NotificationManager::class.java)
 
-            // Наш канал
             val ch = NotificationChannel(CHANNEL_ID, "VPN Статус", NotificationManager.IMPORTANCE_LOW).apply {
                 description = "Статус VPN соединения"
                 setShowBadge(false)
             }
             nm.createNotificationChannel(ch)
 
-            // Глушим системный канал "VPN Connected" от Android
             try {
                 val sysChannel = NotificationChannel(
                     "vpn_connected", "VPN", NotificationManager.IMPORTANCE_NONE
@@ -112,7 +130,6 @@ class VpnNotificationService : Service() {
                 nm.createNotificationChannel(sysChannel)
             } catch (_: Exception) {}
 
-            // Глушим канал singbox плагина
             try {
                 val sbChannel = NotificationChannel(
                     "service", "Service", NotificationManager.IMPORTANCE_NONE
@@ -150,3 +167,4 @@ class VpnNotificationService : Service() {
         }
     }
 }
+

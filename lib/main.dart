@@ -17,7 +17,8 @@ void main() async {
   ));
 
   final prefs = await SharedPreferences.getInstance();
-  final accentValue = prefs.getInt('accent_color') ?? AppColors.neonBlue.value;
+  final accentValue =
+      prefs.getInt('accent_color') ?? AppColors.neonBlue.toARGB32();
   final tosAccepted = prefs.getBool('tos_accepted') ?? false;
 
   runApp(EndVpnApp(
@@ -29,16 +30,20 @@ void main() async {
 class EndVpnApp extends StatefulWidget {
   final Color accentColor;
   final bool tosAccepted;
-  const EndVpnApp({super.key, required this.accentColor, required this.tosAccepted});
+  const EndVpnApp({
+    super.key,
+    required this.accentColor,
+    required this.tosAccepted,
+  });
 
-  static _EndVpnAppState? of(BuildContext context) =>
-      context.findAncestorStateOfType<_EndVpnAppState>();
+  static EndVpnAppState? of(BuildContext context) =>
+      context.findAncestorStateOfType<EndVpnAppState>();
 
   @override
-  State<EndVpnApp> createState() => _EndVpnAppState();
+  State<EndVpnApp> createState() => EndVpnAppState();
 }
 
-class _EndVpnAppState extends State<EndVpnApp> {
+class EndVpnAppState extends State<EndVpnApp> {
   late Color _accentColor;
   late bool _tosAccepted;
 
@@ -52,7 +57,7 @@ class _EndVpnAppState extends State<EndVpnApp> {
   Future<void> setAccentColor(Color color) async {
     setState(() => _accentColor = color);
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt('accent_color', color.value);
+    await prefs.setInt('accent_color', color.toARGB32());
   }
 
   void onTosAccepted() {

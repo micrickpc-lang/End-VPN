@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:math';
 import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:logger/logger.dart';
@@ -14,35 +13,30 @@ class RemnawaveService {
 
   final _log = Logger();
 
-  final _storage = const FlutterSecureStorage(
-    aOptions: AndroidOptions(encryptedSharedPreferences: true),
-  );
+  final _storage = const FlutterSecureStorage();
 
   Dio? _dio;
+  Future<SharedPreferences>? _prefsFuture;
 
-  static const _keyUuid   = 'user_uuid';
+  static const _keyUuid = 'user_uuid';
   static const _keySubUrl = 'user_sub_url';
-  static const _keyTgId   = 'user_tg_id';
+  static const _keyTgId = 'user_tg_id';
   static const _keyAnonId = 'anon_user_uuid';
 
-  // SharedPreferences ключи для бэкапа (выживают после переустановки на Android)
-  static const _spKeyUuid   = 'sp_user_uuid';
+  static const _spKeyUuid = 'sp_user_uuid';
   static const _spKeyAnonId = 'sp_anon_uuid';
   static const _spKeySubUrl = 'sp_sub_url';
 
-  static const freeSquadUuid = '2890e16a-a2be-4049-9413-fb3531a3cbdb';
-  static const paidSquadUuid = '833414d4-ca2d-47c0-87da-24d6b38a9f20';
-
-  // ── Lazy init ─────────────────────────────────────────────────────────────
+  static const defaultSquadUuid = '72972871-bb7d-44c7-a9d0-76952720e5f9';
+  static const freeSquadUuid = defaultSquadUuid;
+  static const freeTrafficLimitBytes = 15 * 1024 * 1024 * 1024;
+  static const freeTrafficLimitStrategy = 'MONTH';
 
   void init() {
     if (_dio != null) return;
     _dio = Dio(BaseOptions(
-      baseUrl: AppConfig.remnawaveBaseUrl,
-      headers: {
-        'Authorization': 'Bearer ${AppConfig.remnawaveToken}',
-        'Content-Type': 'application/json',
-      },
+      baseUrl: AppConfig.botApiUrl,
+      headers: {'Content-Type': 'application/json'},
       connectTimeout: const Duration(seconds: 10),
       receiveTimeout: const Duration(seconds: 10),
     ));
@@ -53,55 +47,58 @@ class RemnawaveService {
     return _dio!;
   }
 
-  // ── SharedPreferences бэкап ───────────────────────────────────────────────
+  Future<SharedPreferences> get _prefs =>
+      _prefsFuture ??= SharedPreferences.getInstance();
 
-  /// Читает UUID: сначала SecureStorage, фолбэк на SharedPreferences
   Future<String?> _readUuidWithFallback(String secureKey, String spKey) async {
     final fromSecure = await _storage.read(key: secureKey);
     if (fromSecure != null && fromSecure.isNotEmpty) return fromSecure;
 
-    // SecureStorage пуст (переустановка?) — пробуем бэкап
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await _prefs;
     final fromSp = prefs.getString(spKey);
     if (fromSp != null && fromSp.isNotEmpty) {
       _log.i('UUID restored from SharedPreferences backup: $fromSp');
-      // Восстанавливаем в SecureStorage
       await _storage.write(key: secureKey, value: fromSp);
       return fromSp;
     }
     return null;
   }
 
-  /// Сохраняет UUID в оба хранилища
-  Future<void> _writeUuidBoth(String secureKey, String spKey, String value) async {
+  Future<void> _writeUuidBoth(
+      String secureKey, String spKey, String value) async {
     await _storage.write(key: secureKey, value: value);
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await _prefs;
     await prefs.setString(spKey, value);
   }
 
-  /// Сохраняет subUrl в оба хранилища
   Future<void> _writeSubUrlBoth(String value) async {
     await _storage.write(key: _keySubUrl, value: value);
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await _prefs;
     await prefs.setString(_spKeySubUrl, value);
   }
 
   Future<String?> _readSubUrlWithFallback() async {
     final fromSecure = await _storage.read(key: _keySubUrl);
     if (fromSecure != null && fromSecure.isNotEmpty) return fromSecure;
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await _prefs;
     return prefs.getString(_spKeySubUrl);
   }
 
-  // ─── Helpers ──────────────────────────────────────────────────────────────
-
   Map<String, dynamic> _unwrap(dynamic data) {
     if (data is String) {
-      try { data = jsonDecode(data); } catch (_) { return {}; }
+      try {
+        data = jsonDecode(data);
+      } catch (_) {
+        return {};
+      }
     }
     if (data is Map<String, dynamic>) {
       if (data.containsKey('response')) {
         final inner = data['response'];
+        if (inner is Map<String, dynamic>) return inner;
+      }
+      if (data.containsKey('user')) {
+        final inner = data['user'];
         if (inner is Map<String, dynamic>) return inner;
       }
       return data;
@@ -115,19 +112,36 @@ class RemnawaveService {
     return int.tryParse(match?.group(1) ?? '0') ?? 0;
   }
 
-  String _buildDescription(int clicks) => 'clicks:$clicks';
+  String _resolveSubscriptionUrl(Map<String, dynamic> data) {
+    final direct = data['subscriptionUrl'] ??
+        data['subUrl'] ??
+        data['sub_url'] ??
+        data['subscription_url'];
+    if (direct is String && direct.isNotEmpty) return direct;
 
-  bool _is404(dynamic e) =>
-      e is DioException && e.response?.statusCode == 404;
+    final subscription = data['subscription'];
+    if (subscription is Map<String, dynamic>) {
+      final nested = subscription['url'] ?? subscription['uri'];
+      if (nested is String && nested.isNotEmpty) return nested;
+    }
+
+    final shortUuid = data['shortUuid'] ?? data['short_uuid'];
+    if (shortUuid is String && shortUuid.isNotEmpty) {
+      final base = AppConfig.remnawaveBaseUrl.replaceFirst(RegExp(r'/$'), '');
+      return '$base/sub/$shortUuid';
+    }
+
+    return '';
+  }
+
+  bool _is404(dynamic e) => e is DioException && e.response?.statusCode == 404;
 
   bool _isNetworkError(dynamic e) =>
       e is DioException &&
       (e.type == DioExceptionType.connectionError ||
-       e.type == DioExceptionType.connectionTimeout ||
-       e.type == DioExceptionType.receiveTimeout ||
-       e.type == DioExceptionType.sendTimeout);
-
-  // ─── Анонимный юзер ───────────────────────────────────────────────────────
+          e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.receiveTimeout ||
+          e.type == DioExceptionType.sendTimeout);
 
   Future<UserModel> getOrCreateAnonUser() async {
     final savedUuid = await _readUuidWithFallback(_keyAnonId, _spKeyAnonId);
@@ -137,9 +151,10 @@ class RemnawaveService {
         final user = await _getUserByUuid(savedUuid);
 
         if (!user.username.startsWith('anon_')) {
-          _log.w('Stored anon UUID points to non-anon user (${user.username}) — resetting');
+          _log.w(
+              'Stored anon UUID points to non-anon user (${user.username}) — resetting');
           await _storage.delete(key: _keyAnonId);
-          final prefs = await SharedPreferences.getInstance();
+          final prefs = await _prefs;
           await prefs.remove(_spKeyAnonId);
           return await _createAnonUser();
         }
@@ -149,26 +164,24 @@ class RemnawaveService {
         }
         _log.i('Loaded anon user: ${user.uuid} (${user.username})');
         return user;
-
       } catch (e) {
         _log.w('Anon UUID load failed: $e');
 
         if (_is404(e)) {
           _log.w('Anon user 404 — creating new');
           await _storage.delete(key: _keyAnonId);
-          final prefs = await SharedPreferences.getInstance();
+          final prefs = await _prefs;
           await prefs.remove(_spKeyAnonId);
           return await _createAnonUser();
         }
 
-        // Сетевая ошибка — фолбэк на кеш
         final cachedSub = await _readSubUrlWithFallback() ?? '';
         if (cachedSub.isNotEmpty) {
           return UserModel(
             uuid: savedUuid,
             username: 'anon',
             subscriptionUrl: cachedSub,
-            trafficLimitBytes: 15 * 1024 * 1024 * 1024,
+            trafficLimitBytes: freeTrafficLimitBytes,
             usedTrafficBytes: 0,
             isActive: true,
             subscriptionType: 'free',
@@ -185,28 +198,8 @@ class RemnawaveService {
   }
 
   Future<UserModel> _createAnonUser() async {
-    final rng = Random();
-    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-    final suffix = List.generate(8, (_) => chars[rng.nextInt(chars.length)]).join();
-    final username = 'anon_$suffix';
-
-    final body = {
-      'username': username,
-      'expireAt': DateTime.now()
-          .add(const Duration(days: 36500))
-          .toUtc()
-          .toIso8601String(),
-      'trafficLimitBytes': 15 * 1024 * 1024 * 1024,
-      'trafficLimitStrategy': 'NO_RESET',
-      'status': 'ACTIVE',
-      'hwidDeviceLimit': 2,
-      'description': _buildDescription(0),
-      'activeInternalSquads': [freeSquadUuid],
-    };
-
-    final resp = await _client.post('/api/users', data: body);
-    final data = _unwrap(resp.data);
-    final user = _mapUser(data);
+    final resp = await _client.post('/app/anon');
+    final user = _mapUser(_unwrap(resp.data));
 
     await _writeUuidBoth(_keyAnonId, _spKeyAnonId, user.uuid);
     if (user.subscriptionUrl.isNotEmpty) {
@@ -216,13 +209,13 @@ class RemnawaveService {
     return user;
   }
 
-  // ─── Юзер по Telegram ID ─────────────────────────────────────────────────
-
   Future<UserModel> getOrCreateUserByTgId(int tgId) async {
-    final savedUuid  = await _readUuidWithFallback(_keyUuid, _spKeyUuid);
-    final savedTgId  = await _storage.read(key: _keyTgId);
+    final savedUuid = await _readUuidWithFallback(_keyUuid, _spKeyUuid);
+    final savedTgId = await _storage.read(key: _keyTgId);
 
-    if (savedUuid != null && savedUuid.isNotEmpty && savedTgId == tgId.toString()) {
+    if (savedUuid != null &&
+        savedUuid.isNotEmpty &&
+        savedTgId == tgId.toString()) {
       try {
         final user = await _getUserByUuid(savedUuid);
         if (user.subscriptionUrl.isNotEmpty) {
@@ -233,7 +226,7 @@ class RemnawaveService {
       } catch (e) {
         if (_is404(e)) {
           await _storage.delete(key: _keyUuid);
-          final prefs = await SharedPreferences.getInstance();
+          final prefs = await _prefs;
           await prefs.remove(_spKeyUuid);
         } else if (_isNetworkError(e)) {
           final cachedSub = await _readSubUrlWithFallback() ?? '';
@@ -242,7 +235,7 @@ class RemnawaveService {
               uuid: savedUuid,
               username: 'tg_$tgId',
               subscriptionUrl: cachedSub,
-              trafficLimitBytes: 10 * 1024 * 1024 * 1024,
+              trafficLimitBytes: freeTrafficLimitBytes,
               usedTrafficBytes: 0,
               isActive: true,
               subscriptionType: 'free',
@@ -252,7 +245,7 @@ class RemnawaveService {
         } else {
           _log.w('UUID load failed: $e — clearing cache');
           await _storage.delete(key: _keyUuid);
-          final prefs = await SharedPreferences.getInstance();
+          final prefs = await _prefs;
           await prefs.remove(_spKeyUuid);
         }
       }
@@ -265,17 +258,16 @@ class RemnawaveService {
       if (user.subscriptionUrl.isNotEmpty) {
         await _writeSubUrlBoth(user.subscriptionUrl);
       }
-      _log.i('Found by telegramId: ${user.uuid}');
+      _log.i('Found or created by telegramId: ${user.uuid}');
       return user;
-    } catch (_) {
-      _log.i('Not found by telegramId, creating: tg_$tgId');
+    } catch (e) {
+      _log.e('tg user lookup/create failed: $e');
+      rethrow;
     }
-
-    return await _createUser(tgId);
   }
 
   Future<UserModel> _getUserByUuid(String uuid) async {
-    final resp = await _client.get('/api/users/$uuid');
+    final resp = await _client.get('/app/user/$uuid');
     final data = _unwrap(resp.data);
     if ((data['uuid'] as String? ?? '').isEmpty) {
       throw Exception('Empty uuid in response');
@@ -283,98 +275,38 @@ class RemnawaveService {
     return _mapUser(data);
   }
 
-  Future<UserModel> _getUserByTelegramId(int tgId) async {
-    try {
-      final resp = await _client.get('/api/users', queryParameters: {'telegramId': tgId});
-      final raw  = _unwrap(resp.data);
-      if (raw['users'] is List) {
-        final list = raw['users'] as List;
-        if (list.isNotEmpty) return _mapUser(list[0] as Map<String, dynamic>);
-      }
-    } catch (_) {}
-
-    int page = 1;
-    const limit = 100;
-    while (true) {
-      final resp = await _client.get('/api/users',
-          queryParameters: {'limit': limit, 'offset': (page - 1) * limit});
-      final raw   = _unwrap(resp.data);
-      final list  = (raw['users'] as List?) ?? [];
-      final total = (raw['total'] as int?) ?? 0;
-
-      for (final item in list) {
-        final map = item as Map<String, dynamic>;
-        if (map['telegramId'] == tgId) return _mapUser(map);
-      }
-
-      if (list.length < limit || page * limit >= total) break;
-      page++;
+  Future<UserModel> refreshUser(String uuid) async {
+    if (uuid.isEmpty) {
+      throw ArgumentError.value(uuid, 'uuid', 'User UUID must not be empty');
     }
-
-    throw Exception('User with telegramId $tgId not found');
-  }
-
-  Future<UserModel> _createUser(int tgId) async {
-    final username = 'tg${tgId}_${DateTime.now().millisecondsSinceEpoch ~/ 1000}';
-    final expireAt = DateTime.now().add(const Duration(days: 3)).toUtc().toIso8601String();
-
-    final body = {
-      'username': username,
-      'telegramId': tgId,
-      'trafficLimitBytes': 1 * 1024 * 1024 * 1024,
-      'trafficLimitStrategy': 'NO_RESET',
-      'expireAt': expireAt,
-      'status': 'ACTIVE',
-      'hwidDeviceLimit': 2,
-      'description': _buildDescription(0),
-      'activeInternalSquads': [freeSquadUuid],
-    };
-
-    final resp = await _client.post('/api/users', data: body);
-    final data = _unwrap(resp.data);
-    final user = _mapUser(data);
-
-    await _writeUuidBoth(_keyUuid, _spKeyUuid, user.uuid);
-    await _storage.write(key: _keyTgId, value: tgId.toString());
+    final user = await _getUserByUuid(uuid);
     if (user.subscriptionUrl.isNotEmpty) {
       await _writeSubUrlBoth(user.subscriptionUrl);
     }
-    _log.i('Created tg user: ${user.uuid}');
     return user;
   }
 
-  // ─── Активация подписки ───────────────────────────────────────────────────
+  Future<UserModel> _getUserByTelegramId(int tgId) async {
+    final resp = await _client.post('/app/tg', data: {'tg_id': tgId});
+    final data = _unwrap(resp.data);
+    if ((data['uuid'] as String? ?? '').isEmpty) {
+      throw Exception('User with telegramId $tgId not found');
+    }
+    return _mapUser(data);
+  }
 
-  Future<UserModel> activateSubscription(String uuid, int days) async {
-    int clicks = 0;
-    DateTime baseDate = DateTime.now();
-    try {
-      final current = await _getUserByUuid(uuid);
-      clicks = current.clickerBalance;
-      if (current.expireAt != null && current.expireAt!.isAfter(DateTime.now())) {
-        baseDate = current.expireAt!;
-      }
-    } catch (_) {}
-
-    final expireAt = baseDate.add(Duration(days: days)).toUtc().toIso8601String();
-    final resp = await _client.patch('/api/users/', data: {
+  Future<UserModel> applyPromoCode(String uuid, String code) async {
+    final resp = await _client.post('/app/promo', data: {
       'uuid': uuid,
-      'expireAt': expireAt,
-      'trafficLimitBytes': 0,
-      'status': 'ACTIVE',
-      'description': _buildDescription(clicks),
-      'activeInternalSquads': [paidSquadUuid],
+      'code': code,
     });
-
     final user = _mapUser(_unwrap(resp.data));
     if (user.subscriptionUrl.isNotEmpty) {
       await _writeSubUrlBoth(user.subscriptionUrl);
     }
-    _log.i('Activated paid: ${user.uuid}, days: $days');
+    _log.i('Promo applied: ${user.uuid}');
     return user;
   }
-
-  // ─── Кликер ───────────────────────────────────────────────────────────────
 
   Future<int> getClickerBalance(String uuid) async {
     final user = await _getUserByUuid(uuid);
@@ -383,43 +315,39 @@ class RemnawaveService {
 
   Future<void> saveClickerBalance(String uuid, int clicks) async {
     try {
-      await _client.patch('/api/users/', data: {
+      await _client.post('/app/clicks', data: {
         'uuid': uuid,
-        'description': _buildDescription(clicks),
+        'clicks': clicks,
       });
     } catch (e) {
       _log.w('saveClickerBalance error: $e');
     }
   }
 
-  // ─── User mapping ─────────────────────────────────────────────────────────
-
   UserModel _mapUser(Map<String, dynamic> data) {
-    final squads = (data['activeInternalSquads'] as List?) ?? [];
-    final isPaid = squads.any((s) => (s as Map)['uuid'] == paidSquadUuid);
     final clicks = _parseClicks(data['description'] as String?);
     final traffic = (data['userTraffic'] as Map<String, dynamic>?) ?? {};
+    final trafficLimitBytes = (data['trafficLimitBytes'] as num?)?.toInt() ?? 0;
 
     return UserModel(
       uuid: data['uuid'] as String? ?? '',
       username: data['username'] as String? ?? '',
-      subscriptionUrl: data['subscriptionUrl'] as String? ?? '',
+      subscriptionUrl: _resolveSubscriptionUrl(data),
       expireAt: data['expireAt'] != null
           ? DateTime.tryParse(data['expireAt'].toString())
           : null,
-      trafficLimitBytes: (data['trafficLimitBytes'] as num?)?.toInt() ?? 0,
+      trafficLimitBytes: trafficLimitBytes,
       usedTrafficBytes: (traffic['usedTrafficBytes'] as num?)?.toInt() ?? 0,
       isActive: data['status'] == 'ACTIVE',
-      subscriptionType: isPaid ? 'paid' : 'free',
+      subscriptionType: trafficLimitBytes == 0 ? 'paid' : 'free',
       clickerBalance: clicks,
     );
   }
 
-  // ─── Storage helpers ──────────────────────────────────────────────────────
-
-  Future<String?> getSavedUuid()     => _readUuidWithFallback(_keyUuid, _spKeyUuid);
-  Future<String?> getSavedTgId()     => _storage.read(key: _keyTgId);
-  Future<String?> getSavedAnonUuid() => _readUuidWithFallback(_keyAnonId, _spKeyAnonId);
+  Future<String?> getSavedUuid() => _readUuidWithFallback(_keyUuid, _spKeyUuid);
+  Future<String?> getSavedTgId() => _storage.read(key: _keyTgId);
+  Future<String?> getSavedAnonUuid() =>
+      _readUuidWithFallback(_keyAnonId, _spKeyAnonId);
 
   Future<void> saveTgId(int tgId) async {
     await _storage.write(key: _keyTgId, value: tgId.toString());
@@ -429,13 +357,13 @@ class RemnawaveService {
     await _storage.delete(key: _keyUuid);
     await _storage.delete(key: _keyTgId);
     await _storage.delete(key: _keySubUrl);
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await _prefs;
     await prefs.remove(_spKeyUuid);
   }
 
   Future<void> clearAll() async {
     await _storage.deleteAll();
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await _prefs;
     await prefs.remove(_spKeyUuid);
     await prefs.remove(_spKeyAnonId);
     await prefs.remove(_spKeySubUrl);

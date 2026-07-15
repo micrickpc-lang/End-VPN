@@ -33,14 +33,12 @@ class VpnService {
 
     _status = VpnStatus.connecting;
     try {
-      // Вызываем Kotlin/Native для xray-core
       final result = await _channel.invokeMethod<bool>('startVpn', {
         'subscriptionUrl': subUrl,
       });
       _status = result == true ? VpnStatus.connected : VpnStatus.error;
       return result == true;
     } on MissingPluginException {
-      // На Windows/эмуляторе нет нативного канала — мок
       _log.w('VPN channel not available (desktop mock)');
       await Future.delayed(const Duration(seconds: 2));
       _status = VpnStatus.connected;
@@ -56,7 +54,7 @@ class VpnService {
     try {
       await _channel.invokeMethod('stopVpn');
     } on MissingPluginException {
-      // мок
+      _log.w('VPN channel not available on disconnect');
     }
     _status = VpnStatus.disconnected;
   }
