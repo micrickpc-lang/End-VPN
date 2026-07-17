@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:logger/logger.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -11,7 +12,12 @@ class RemnawaveService {
   factory RemnawaveService() => _instance;
   RemnawaveService._internal();
 
-  final _log = Logger();
+  final _log = Logger(level: kReleaseMode ? Level.warning : Level.trace);
+
+  static String _short(String? uuid) =>
+      kReleaseMode || uuid == null || uuid.length < 8
+          ? '***'
+          : uuid.substring(0, 8);
 
   final _storage = const FlutterSecureStorage();
 
@@ -27,8 +33,6 @@ class RemnawaveService {
   static const _spKeyAnonId = 'sp_anon_uuid';
   static const _spKeySubUrl = 'sp_sub_url';
 
-  static const defaultSquadUuid = '72972871-bb7d-44c7-a9d0-76952720e5f9';
-  static const freeSquadUuid = defaultSquadUuid;
   static const freeTrafficLimitBytes = 15 * 1024 * 1024 * 1024;
   static const freeTrafficLimitStrategy = 'MONTH';
 
@@ -57,7 +61,7 @@ class RemnawaveService {
     final prefs = await _prefs;
     final fromSp = prefs.getString(spKey);
     if (fromSp != null && fromSp.isNotEmpty) {
-      _log.i('UUID restored from SharedPreferences backup: $fromSp');
+      _log.i('UUID restored from SharedPreferences backup: ${_short(fromSp)}');
       await _storage.write(key: secureKey, value: fromSp);
       return fromSp;
     }
@@ -162,7 +166,7 @@ class RemnawaveService {
         if (user.subscriptionUrl.isNotEmpty) {
           await _writeSubUrlBoth(user.subscriptionUrl);
         }
-        _log.i('Loaded anon user: ${user.uuid} (${user.username})');
+        _log.i('Loaded anon user: ${_short(user.uuid)} (${user.username})');
         return user;
       } catch (e) {
         _log.w('Anon UUID load failed: $e');
@@ -205,7 +209,7 @@ class RemnawaveService {
     if (user.subscriptionUrl.isNotEmpty) {
       await _writeSubUrlBoth(user.subscriptionUrl);
     }
-    _log.i('Created anon user: ${user.uuid} (${user.username})');
+    _log.i('Created anon user: ${_short(user.uuid)} (${user.username})');
     return user;
   }
 
@@ -221,7 +225,7 @@ class RemnawaveService {
         if (user.subscriptionUrl.isNotEmpty) {
           await _writeSubUrlBoth(user.subscriptionUrl);
         }
-        _log.i('Loaded by uuid: ${user.uuid}');
+        _log.i('Loaded by uuid: ${_short(user.uuid)}');
         return user;
       } catch (e) {
         if (_is404(e)) {
@@ -258,7 +262,7 @@ class RemnawaveService {
       if (user.subscriptionUrl.isNotEmpty) {
         await _writeSubUrlBoth(user.subscriptionUrl);
       }
-      _log.i('Found or created by telegramId: ${user.uuid}');
+      _log.i('Found or created by telegramId: ${_short(user.uuid)}');
       return user;
     } catch (e) {
       _log.e('tg user lookup/create failed: $e');
@@ -304,7 +308,7 @@ class RemnawaveService {
     if (user.subscriptionUrl.isNotEmpty) {
       await _writeSubUrlBoth(user.subscriptionUrl);
     }
-    _log.i('Promo applied: ${user.uuid}');
+    _log.i('Promo applied: ${_short(user.uuid)}');
     return user;
   }
 

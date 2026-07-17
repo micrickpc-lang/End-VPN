@@ -43,3 +43,13 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Secrets / local data
+/android/key.properties
+*.jks
+*.keystore
+backend/payment/*.sqlite3
+backend/payment/.env
+/installer/windows/*.zip
+/installer/custom/bin/
+/installer/custom/obj/

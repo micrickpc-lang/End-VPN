@@ -1,7 +1,7 @@
 class AppConfig {
   static const String remnawaveBaseUrl = 'https://panel.kaban4ik.ru';
 
-  static const String botApiUrl = 'https://panel.kaban4ik.ru';
+  static const String botApiUrl = 'https://panel.kaban4ik.ru/payment';
 
   static const String paymentReturnUrl = 'endvpn://payment/success';
   static const String paymentReturnUrlScheme = 'endvpn';

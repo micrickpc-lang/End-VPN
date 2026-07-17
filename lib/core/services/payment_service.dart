@@ -30,7 +30,7 @@ class PaymentService {
     required SubscriptionPlan plan,
   }) async {
     try {
-      final resp = await _postWithRetry('/payment/create', data: {
+      final resp = await _postWithRetry('/create', data: {
         'device_uuid': deviceUuid,
         'plan_id': plan.id,
       });
@@ -134,7 +134,7 @@ class PaymentService {
     if (paymentId == null) return PaymentStatus.none;
 
     try {
-      final resp = await _postWithRetry('/payment/check', data: {
+      final resp = await _postWithRetry('/check', data: {
         'payment_id': paymentId,
         'device_uuid': uuid ?? '',
       });

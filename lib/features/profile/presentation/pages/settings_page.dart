@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:endvpn/main.dart';
 import 'package:endvpn/shared/theme/app_theme.dart';
 import 'package:endvpn/shared/widgets/glass_card.dart';
+import 'package:endvpn/shared/widgets/liquid_glass_button.dart';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
@@ -108,6 +109,126 @@ class SettingsPage extends StatelessWidget {
                   ],
                 );
               }),
+            ),
+            const SizedBox(height: 16),
+            GlassCard(
+              blur: 18,
+              padding: const EdgeInsets.all(20),
+              child: StatefulBuilder(builder: (ctx, setSt) {
+                final liquidSupported = LiquidGlassButton.supported;
+                final liquidOn = app.liquidGlassEnabled;
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'VPN BUTTON STYLE',
+                      style: TextStyle(
+                        fontFamily: 'SpaceMono',
+                        fontSize: 10,
+                        color: AppColors.darkTextSub,
+                        letterSpacing: 2,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _StyleOption(
+                            label: 'Liquid Glass',
+                            icon: Icons.blur_circular_rounded,
+                            selected: liquidOn,
+                            accentColor: app.accentColor,
+                            onTap: () async {
+                              await app.setLiquidGlass(true);
+                              setSt(() {});
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _StyleOption(
+                            label: 'Classic',
+                            icon: Icons.circle_outlined,
+                            selected: !liquidOn,
+                            accentColor: app.accentColor,
+                            onTap: () async {
+                              await app.setLiquidGlass(false);
+                              setSt(() {});
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (!liquidSupported) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        'Устройство не поддерживает шейдеры — используется Classic',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: AppColors.darkTextSub.withValues(alpha: 0.8),
+                        ),
+                      ),
+                    ],
+                  ],
+                );
+              }),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StyleOption extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final Color accentColor;
+  final VoidCallback onTap;
+
+  const _StyleOption({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.accentColor,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        curve: Curves.easeOutCubic,
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        decoration: BoxDecoration(
+          color: selected
+              ? accentColor.withValues(alpha: 0.14)
+              : Colors.white.withValues(alpha: 0.04),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: selected
+                ? accentColor.withValues(alpha: 0.55)
+                : Colors.white.withValues(alpha: 0.10),
+            width: selected ? 1.5 : 1,
+          ),
+        ),
+        child: Column(
+          children: [
+            Icon(icon,
+                size: 26,
+                color: selected ? accentColor : AppColors.darkTextSub),
+            const SizedBox(height: 8),
+            Text(
+              label,
+              style: TextStyle(
+                fontFamily: 'Rajdhani',
+                fontSize: 14,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+                color: selected ? accentColor : AppColors.darkText,
+              ),
             ),
           ],
         ),

@@ -1,5 +1,6 @@
 import 'dart:ui';
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -18,11 +19,13 @@ class ProfilePage extends StatefulWidget {
   final UserModel user;
   final Color accentColor;
   final void Function(UserModel) onUserUpdated;
+  final ValueListenable<int>? activeTab;
   const ProfilePage({
     super.key,
     required this.user,
     required this.accentColor,
     required this.onUserUpdated,
+    this.activeTab,
   });
 
   @override
@@ -82,15 +85,38 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
       _checkPendingPayment();
       _refreshUserStats();
     });
+    widget.activeTab?.addListener(_onActiveTabChanged);
+    if (_isTabVisible) _startStatsTimer();
+  }
+
+  bool get _isTabVisible => widget.activeTab?.value == 2 || widget.activeTab == null;
+
+  void _onActiveTabChanged() {
+    if (_isTabVisible) {
+      _refreshUserStats();
+      _startStatsTimer();
+    } else {
+      _stopStatsTimer();
+    }
+  }
+
+  void _startStatsTimer() {
+    if (_statsSyncTimer?.isActive == true) return;
     _statsSyncTimer = Timer.periodic(
       const Duration(seconds: 30),
       (_) => _refreshUserStats(),
     );
   }
 
+  void _stopStatsTimer() {
+    _statsSyncTimer?.cancel();
+    _statsSyncTimer = null;
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    widget.activeTab?.removeListener(_onActiveTabChanged);
     _statsSyncTimer?.cancel();
     super.dispose();
   }

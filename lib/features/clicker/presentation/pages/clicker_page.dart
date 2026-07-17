@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -8,7 +9,8 @@ import 'package:endvpn/shared/theme/app_theme.dart';
 import 'package:endvpn/shared/widgets/glass_card.dart';
 
 class ClickerPage extends StatefulWidget {
-  const ClickerPage({super.key});
+  final ValueListenable<int>? activeTab;
+  const ClickerPage({super.key, this.activeTab});
 
   @override
   State<ClickerPage> createState() => _ClickerPageState();
@@ -77,7 +79,16 @@ class _ClickerPageState extends State<ClickerPage>
       duration: const Duration(seconds: 3),
     )..repeat(reverse: true);
 
+    widget.activeTab?.addListener(_onActiveTabChanged);
+    if (widget.activeTab != null) {
+      _isVisible = widget.activeTab!.value == 1;
+    }
+
     _loadState();
+  }
+
+  void _onActiveTabChanged() {
+    setVisible(widget.activeTab!.value == 1);
   }
 
   @override
@@ -186,6 +197,7 @@ class _ClickerPageState extends State<ClickerPage>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    widget.activeTab?.removeListener(_onActiveTabChanged);
     _stopPassiveTimer();
     _saveDebounce?.cancel();
     _flushSave();

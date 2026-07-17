@@ -13,8 +13,11 @@ class AdService {
   RewardedAd? _rewardedAd;
   RewardedAdLoader? _adLoader;
   bool _isLoaded = false;
+  Future<void>? _initFuture;
 
-  Future<void> init() async {
+  Future<void> init() => _initFuture ??= _initialize();
+
+  Future<void> _initialize() async {
     if (!Platform.isAndroid && !Platform.isIOS) return;
     await MobileAds.initialize();
     await _createLoader();

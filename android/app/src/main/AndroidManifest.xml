@@ -1,5 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED" />
@@ -26,6 +27,15 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="endvpn"
+                    android:host="payment"
+                    android:pathPrefix="/success" />
             </intent-filter>
         </activity>
 
@@ -61,9 +71,8 @@
 
         <receiver
             android:name=".VpnStatusReceiver"
-            android:exported="true">
+            android:exported="false">
             <intent-filter>
-                <action android:name="io.nekohasekai.sfa.STATUS_CHANGED" />
                 <action android:name="com.example.endvpn.XRAY_STATUS" />
             </intent-filter>
         </receiver>

@@ -20,7 +20,6 @@ dependencies:
   url_launcher: ^6.3.0
   flutter_singbox_vpn: ^1.1.2
   shared_preferences: ^2.5.0
-  app_links: ^7.2.1
   yaml: ^3.1.2
   yandex_mobileads: 7.18.0
 
@@ -42,6 +41,8 @@ flutter:
   assets:
     - assets/fonts/
     - assets/images/
+  shaders:
+    - shaders/liquid_glass.frag
   fonts:
     - family: Rajdhani
       fonts:

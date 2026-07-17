@@ -20,20 +20,24 @@ void main() async {
   final accentValue =
       prefs.getInt('accent_color') ?? AppColors.neonBlue.toARGB32();
   final tosAccepted = prefs.getBool('tos_accepted') ?? false;
+  final liquidGlass = prefs.getBool('liquid_glass') ?? true;
 
   runApp(EndVpnApp(
     accentColor: Color(accentValue),
     tosAccepted: tosAccepted,
+    liquidGlass: liquidGlass,
   ));
 }
 
 class EndVpnApp extends StatefulWidget {
   final Color accentColor;
   final bool tosAccepted;
+  final bool liquidGlass;
   const EndVpnApp({
     super.key,
     required this.accentColor,
     required this.tosAccepted,
+    this.liquidGlass = true,
   });
 
   static EndVpnAppState? of(BuildContext context) =>
@@ -46,12 +50,14 @@ class EndVpnApp extends StatefulWidget {
 class EndVpnAppState extends State<EndVpnApp> {
   late Color _accentColor;
   late bool _tosAccepted;
+  late bool _liquidGlass;
 
   @override
   void initState() {
     super.initState();
     _accentColor = widget.accentColor;
     _tosAccepted = widget.tosAccepted;
+    _liquidGlass = widget.liquidGlass;
   }
 
   Future<void> setAccentColor(Color color) async {
@@ -60,11 +66,18 @@ class EndVpnAppState extends State<EndVpnApp> {
     await prefs.setInt('accent_color', color.toARGB32());
   }
 
+  Future<void> setLiquidGlass(bool enabled) async {
+    setState(() => _liquidGlass = enabled);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('liquid_glass', enabled);
+  }
+
   void onTosAccepted() {
     setState(() => _tosAccepted = true);
   }
 
   Color get accentColor => _accentColor;
+  bool get liquidGlassEnabled => _liquidGlass;
 
   @override
   Widget build(BuildContext context) {
@@ -75,7 +88,7 @@ class EndVpnAppState extends State<EndVpnApp> {
       darkTheme: AppTheme.dark(),
       themeMode: ThemeMode.dark,
       home: _tosAccepted
-          ? AppShell(accentColor: _accentColor)
+          ? AppShell(accentColor: _accentColor, liquidGlass: _liquidGlass)
           : AuthPage(onAccepted: onTosAccepted),
     );
   }

@@ -1,0 +1,6 @@
+# Copy this file to android/key.properties and set your local signing values.
+# Keep android/key.properties and the .jks file outside Git.
+storeFile=C:\\keys\\endvpn-release.jks
+storePassword=CHANGE_ME
+keyAlias=endvpn
+keyPassword=CHANGE_ME

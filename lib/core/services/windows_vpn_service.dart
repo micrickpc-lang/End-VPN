@@ -39,6 +39,7 @@ class WindowsVpnService {
     state.value = WindowsVpnState.starting;
     final generation = ++_generation;
     try {
+      await _ensureNoConflictingVpn();
       await _startSingBoxProcess(config, generation);
       await _verifyTunnelOrThrow();
       state.value = WindowsVpnState.connected;
@@ -53,6 +54,7 @@ class WindowsVpnService {
     state.value = WindowsVpnState.starting;
     final generation = ++_generation;
     try {
+      await _ensureNoConflictingVpn();
       await _startXrayProcess(rawXrayConfig, generation);
       final bridgeConfig = _configService.buildXrayBridgeConfig(rawXrayConfig);
       await _startSingBoxProcess(bridgeConfig, generation);
@@ -197,10 +199,54 @@ class WindowsVpnService {
   }
 
   Future<void> _verifyTunnelOrThrow() async {
+    if (!await _hasEndVpnAdapter()) {
+      throw Exception(
+        'Не удалось создать системный маршрут END VPN. '
+        'Закройте другие VPN-приложения и повторите подключение.',
+      );
+    }
     if (await verifyTunnel()) return;
     throw Exception(
       'Подключено, но трафик не проходит через VPN. Попробуйте другой сервер.',
     );
+  }
+
+  Future<void> _ensureNoConflictingVpn() async {
+    final result = await Process.run(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        r"Get-NetAdapter -IncludeHidden | Where-Object { $_.Status -eq 'Up' -and $_.Name -ne 'EndVPN' -and ($_.InterfaceDescription -match 'Wintun|WireGuard|TAP|sing-tun|Tunnel' -or $_.Name -match 'happ|tun|vpn|warp') } | Select-Object -ExpandProperty Name",
+      ],
+      runInShell: false,
+    );
+    final adapters = result.stdout
+        .toString()
+        .split(RegExp(r'[\r\n]+'))
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty)
+        .toList();
+    if (adapters.isEmpty) return;
+    throw Exception(
+      'Обнаружен другой VPN (${adapters.join(', ')}). '
+      'Отключите его перед запуском END VPN.',
+    );
+  }
+
+  Future<bool> _hasEndVpnAdapter() async {
+    final result = await Process.run(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        r"$adapter = Get-NetAdapter -IncludeHidden -Name 'EndVPN' -ErrorAction SilentlyContinue; if ($adapter -and $adapter.Status -eq 'Up') { 'UP' }",
+      ],
+      runInShell: false,
+    );
+    return result.stdout.toString().trim() == 'UP';
   }
 
   Future<bool> verifyTunnel() async {
@@ -218,8 +264,7 @@ class WindowsVpnService {
   }
 
   Future<bool> _probe(String url) async {
-    final client = HttpClient()
-      ..connectionTimeout = const Duration(seconds: 5);
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
     try {
       final request = await client
           .getUrl(Uri.parse(url))

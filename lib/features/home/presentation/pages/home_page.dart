@@ -8,6 +8,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_singbox_vpn/flutter_singbox.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:endvpn/core/services/remnawave_service.dart';
 import 'package:endvpn/core/services/singbox_config_service.dart';
 import 'package:endvpn/core/services/vpn_tile_service.dart';
@@ -16,6 +17,7 @@ import 'package:endvpn/core/services/ad_service.dart';
 import 'package:endvpn/core/models/user_model.dart';
 import 'package:endvpn/shared/theme/app_theme.dart';
 import 'package:endvpn/shared/widgets/glass_card.dart';
+import 'package:endvpn/shared/widgets/liquid_glass_button.dart';
 
 class VpnState {
   static final VpnState _instance = VpnState._internal();
@@ -121,7 +123,8 @@ class VpnState {
 }
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  final bool liquidGlass;
+  const HomePage({super.key, this.liquidGlass = true});
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -147,9 +150,10 @@ class _HomePageState extends State<HomePage>
   bool _connectionFlowActive = false;
   bool? _isPremiumCached;
   DateTime? _premiumCheckedAt;
+  static const _spKeyPremium = 'confirmed_premium';
   String _statusText = 'DISCONNECTED';
-  String _uploadSpeed = '0 Mbps';
-  String _downloadSpeed = '0 Mbps';
+  final _uploadSpeed = ValueNotifier<String>('0 Mbps');
+  final _downloadSpeed = ValueNotifier<String>('0 Mbps');
   String _ping = '--';
   Timer? _pingTimer;
   Timer? _desktopTrafficTimer;
@@ -281,12 +285,10 @@ class _HomePageState extends State<HomePage>
     _desktopTrafficTimer?.cancel();
     _desktopTrafficTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted || !_isConnected) return;
-      setState(() {
-        _displayDownMbps = _nextDisplayMbps(0, _displayDownMbps);
-        _displayUpMbps = _nextDisplayMbps(0, _displayUpMbps);
-        _downloadSpeed = _formatMbps(_displayDownMbps);
-        _uploadSpeed = _formatMbps(_displayUpMbps);
-      });
+      _displayDownMbps = _nextDisplayMbps(0, _displayDownMbps);
+      _displayUpMbps = _nextDisplayMbps(0, _displayUpMbps);
+      _downloadSpeed.value = _formatMbps(_displayDownMbps);
+      _uploadSpeed.value = _formatMbps(_displayUpMbps);
     });
   }
 
@@ -392,7 +394,7 @@ class _HomePageState extends State<HomePage>
         vsync: this, duration: const Duration(milliseconds: 600));
 
     _vpn.init();
-    _ads.init();
+    LiquidGlassButton.ensureLoaded();
 
     if (!_hasNativeVpn) {
       _windowsVpn.state.addListener(_onWindowsVpnStateChanged);
@@ -480,8 +482,8 @@ class _HomePageState extends State<HomePage>
           _isConnected = false;
           _isConnecting = false;
           _statusText = failedDuringStartup ? 'ERROR' : 'DISCONNECTED';
-          _uploadSpeed = '0 Mbps';
-          _downloadSpeed = '0 Mbps';
+          _uploadSpeed.value = '0 Mbps';
+          _downloadSpeed.value = '0 Mbps';
           _displayDownMbps = 0;
           _displayUpMbps = 0;
           _connectController.reverse();
@@ -511,16 +513,17 @@ class _HomePageState extends State<HomePage>
       _trafficDebounce ??= Timer(const Duration(seconds: 1), () {
         _trafficDebounce = null;
         if (!mounted) return;
-        if (_pendingDown != _downloadSpeed || _pendingUp != _uploadSpeed) {
-          setState(() {
-            _downloadSpeed = _pendingDown;
-            _uploadSpeed = _pendingUp;
-          });
-        }
+        _downloadSpeed.value = _pendingDown;
+        _uploadSpeed.value = _pendingUp;
       });
     });
 
-    _loadData();
+    _initializeData();
+  }
+
+  Future<void> _initializeData() async {
+    await _loadCachedPremiumStatus();
+    await _loadData();
   }
 
   @override
@@ -556,8 +559,7 @@ class _HomePageState extends State<HomePage>
       } else {
         user = await _remnawave.getOrCreateAnonUser();
       }
-      _isPremiumCached = user.subscriptionType == 'paid';
-      _premiumCheckedAt = DateTime.now();
+      await _setPremiumStatus(user.isPaid);
 
       if (user.subscriptionUrl.isNotEmpty) {
         await _vpn.saveSubUrl(user.subscriptionUrl);
@@ -583,47 +585,79 @@ class _HomePageState extends State<HomePage>
     }
   }
 
+  static const _subUserAgents = [
+    'v2rayNG/2.2.1',
+    'ClashMetaForAndroid/2.11.15.Meta',
+    'clash-meta',
+    'sing-box/1.12.0',
+    'Mozilla/5.0',
+  ];
+  static const _spKeySubUa = 'sub_ua';
+
+  Future<SingboxSubscriptionResult?> _tryFetchWithUa(
+      String subUrl, String userAgent, String? currentTag) async {
+    try {
+      final resp = await _subscriptionDio.get<String>(
+        subUrl,
+        options: Options(
+          responseType: ResponseType.plain,
+          headers: {
+            'User-Agent': userAgent,
+            'Accept': 'text/plain, application/yaml, application/json, */*',
+          },
+        ),
+      );
+      return _singboxConfig.parseSubscription(
+        resp.data ?? '',
+        currentTag: currentTag,
+        target: _configTarget,
+      );
+    } catch (e) {
+      debugPrint('Subscription format $userAgent failed: $e');
+      return null;
+    }
+  }
+
   Future<void> _fetchSubscription(String subUrl) async {
     if (subUrl.isEmpty) return;
     try {
       final currentTag = _currentServerTag;
+      final prefs = await SharedPreferences.getInstance();
+      final cachedUa = prefs.getString(_spKeySubUa);
+
       SingboxSubscriptionResult? subscription;
-      for (final userAgent in const [
-        'v2rayNG/2.2.1',
-        'ClashMetaForAndroid/2.11.15.Meta',
-        'clash-meta',
-        'sing-box/1.12.0',
-        'Mozilla/5.0',
-      ]) {
-        try {
-          final resp = await _subscriptionDio.get<String>(
-            subUrl,
-            options: Options(
-              responseType: ResponseType.plain,
-              headers: {
-                'User-Agent': userAgent,
-                'Accept': 'text/plain, application/yaml, application/json, */*',
-              },
-            ),
-          );
-          final candidate = _singboxConfig.parseSubscription(
-            resp.data ?? '',
-            currentTag: currentTag,
-            target: _configTarget,
-          );
+      String? winningUa;
+
+      if (cachedUa != null && _subUserAgents.contains(cachedUa)) {
+        final candidate = await _tryFetchWithUa(subUrl, cachedUa, currentTag);
+        if (candidate != null && candidate.servers.isNotEmpty) {
+          subscription = candidate;
+          winningUa = cachedUa;
+        }
+      }
+
+      if (subscription == null) {
+        for (final userAgent in _subUserAgents) {
+          if (userAgent == cachedUa) continue;
+          final candidate =
+              await _tryFetchWithUa(subUrl, userAgent, currentTag);
+          if (candidate == null) continue;
           if (subscription == null ||
               candidate.servers.length > subscription.servers.length ||
               (candidate.servers.length == subscription.servers.length &&
                   candidate.outbounds.length > subscription.outbounds.length)) {
             subscription = candidate;
+            winningUa = userAgent;
           }
-        } catch (e) {
-          debugPrint('Subscription format $userAgent failed: $e');
         }
       }
+
       final loadedSubscription = subscription;
       if (loadedSubscription == null || loadedSubscription.servers.isEmpty) {
         return;
+      }
+      if (winningUa != null && winningUa != cachedUa) {
+        await prefs.setString(_spKeySubUa, winningUa);
       }
 
       await _vpn.saveConfig(loadedSubscription.configJson);
@@ -648,7 +682,27 @@ class _HomePageState extends State<HomePage>
     }
   }
 
-  Future<bool> _checkIsPremium({bool forceRefresh = false}) async {
+  Future<void> _loadCachedPremiumStatus() async {
+    final prefs = await SharedPreferences.getInstance();
+    final premium = prefs.getBool(_spKeyPremium);
+    if (premium == null) return;
+    _isPremiumCached = premium;
+    if (!premium) {
+      await _ads.init();
+    }
+  }
+
+  Future<void> _setPremiumStatus(bool premium) async {
+    _isPremiumCached = premium;
+    _premiumCheckedAt = DateTime.now();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_spKeyPremium, premium);
+    if (!premium) {
+      await _ads.init();
+    }
+  }
+
+  Future<bool?> _checkIsPremium({bool forceRefresh = false}) async {
     final cached = _isPremiumCached;
     final checkedAt = _premiumCheckedAt;
     final cacheIsFresh = checkedAt != null &&
@@ -664,12 +718,11 @@ class _HomePageState extends State<HomePage>
       } else {
         user = await _remnawave.getOrCreateAnonUser();
       }
-      _isPremiumCached = user.subscriptionType == 'paid';
-      _premiumCheckedAt = DateTime.now();
-      return _isPremiumCached!;
+      await _setPremiumStatus(user.isPaid);
+      return user.isPaid;
     } catch (e) {
       debugPrint('checkIsPremium error: $e');
-      return _isPremiumCached ?? false;
+      return _isPremiumCached == true ? true : null;
     }
   }
 
@@ -696,11 +749,11 @@ class _HomePageState extends State<HomePage>
       _vpn.isConnected = false;
       _vpn.isConnecting = false;
       _statusText = 'DISCONNECTED';
-      _uploadSpeed = '0 Mbps';
-      _downloadSpeed = '0 Mbps';
       _displayDownMbps = 0;
       _displayUpMbps = 0;
     });
+    _uploadSpeed.value = '0 Mbps';
+    _downloadSpeed.value = '0 Mbps';
     _connectController.reverse();
     _pulseController.stop();
     _pulseController.value = 0;
@@ -734,7 +787,7 @@ class _HomePageState extends State<HomePage>
 
     final isPremium = await _checkIsPremium(forceRefresh: true);
     if (!mounted) return;
-    if (!isPremium) {
+    if (isPremium == false) {
       final watched = await _ads.showRewardedAd(context);
       if (!mounted) return;
       if (!watched) return;
@@ -1005,6 +1058,8 @@ class _HomePageState extends State<HomePage>
     _statusSub?.cancel();
     _trafficSub?.cancel();
     _logSub?.cancel();
+    _uploadSpeed.dispose();
+    _downloadSpeed.dispose();
     _pulseController.dispose();
     _connectController.dispose();
     super.dispose();
@@ -1141,6 +1196,62 @@ class _HomePageState extends State<HomePage>
   }
 
   Widget _buildConnectButton(Size size) {
+    if (widget.liquidGlass && LiquidGlassButton.supported) {
+      return _buildLiquidGlassButton(size);
+    }
+    return _buildClassicConnectButton(size);
+  }
+
+  Widget _buildLiquidGlassButton(Size size) {
+    return RepaintBoundary(
+      child: AnimatedBuilder(
+        animation: Listenable.merge([_pulseController, _connectController]),
+        builder: (context, child) {
+          final Color primaryColor = _isConnecting
+              ? Color.lerp(AppColors.neonBlue, AppColors.warning,
+                  _connectController.value)!
+              : _isConnected
+                  ? AppColors.connected
+                  : AppColors.neonBlue;
+          final Color contentColor = _isConnected ? Colors.white : primaryColor;
+          final stateMix = _isConnected ? 1.0 : (_isConnecting ? 0.45 : 0.0);
+
+          return LiquidGlassButton(
+            size: 180,
+            stateColor: primaryColor,
+            stateMix: stateMix,
+            pulse: _isConnected ? _pulseController.value : 0,
+            onTap: _toggleConnection,
+            fallback: _buildClassicConnectButton(size),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (_isConnecting)
+                  const SizedBox(
+                      width: 36,
+                      height: 36,
+                      child: CircularProgressIndicator(
+                          color: AppColors.warning, strokeWidth: 2))
+                else
+                  Icon(Icons.power_settings_new_rounded,
+                      size: 52, color: contentColor),
+                const SizedBox(height: 8),
+                Text(_statusText,
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontFamily: 'SpaceMono',
+                        fontWeight: FontWeight.w700,
+                        color: contentColor,
+                        letterSpacing: 2)),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildClassicConnectButton(Size size) {
     return RepaintBoundary(
       child: GestureDetector(
         onTap: _toggleConnection,
@@ -1262,18 +1373,22 @@ class _HomePageState extends State<HomePage>
                 color: AppColors.neonBlue)),
         const SizedBox(width: 12),
         Expanded(
-            child: _StatCard(
-                icon: Icons.arrow_downward_rounded,
-                label: 'DOWNLOAD',
-                value: _downloadSpeed,
-                color: AppColors.connected)),
+            child: ValueListenableBuilder<String>(
+                valueListenable: _downloadSpeed,
+                builder: (_, speed, __) => _StatCard(
+                    icon: Icons.arrow_downward_rounded,
+                    label: 'DOWNLOAD',
+                    value: speed,
+                    color: AppColors.connected))),
         const SizedBox(width: 12),
         Expanded(
-            child: _StatCard(
-                icon: Icons.arrow_upward_rounded,
-                label: 'UPLOAD',
-                value: _uploadSpeed,
-                color: AppColors.crimson)),
+            child: ValueListenableBuilder<String>(
+                valueListenable: _uploadSpeed,
+                builder: (_, speed, __) => _StatCard(
+                    icon: Icons.arrow_upward_rounded,
+                    label: 'UPLOAD',
+                    value: speed,
+                    color: AppColors.crimson))),
       ])
           .animate(delay: 300.ms)
           .fadeIn(duration: 600.ms)

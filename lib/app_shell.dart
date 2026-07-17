@@ -8,37 +8,37 @@ import 'package:endvpn/core/models/user_model.dart';
 import 'package:endvpn/core/services/remnawave_service.dart';
 import 'package:endvpn/shared/theme/app_theme.dart';
 import 'package:endvpn/shared/widgets/glass_card.dart';
+import 'package:endvpn/shared/widgets/liquid_glass_button.dart';
 
 class AppShell extends StatefulWidget {
   final UserModel? user;
   final Color accentColor;
-  const AppShell({super.key, this.user, required this.accentColor});
+  final bool liquidGlass;
+  const AppShell({
+    super.key,
+    this.user,
+    required this.accentColor,
+    this.liquidGlass = true,
+  });
 
   @override
   State<AppShell> createState() => _AppShellState();
 }
 
-class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
+class _AppShellState extends State<AppShell> {
   int _currentIndex = 0;
-  final Set<int> _builtTabs = {0};
   UserModel? _user;
   bool _userLoading = true;
-  final bool _vpnConnected = false;
 
   late Color _accentColor;
   bool _userUpdatedLocally = false;
 
-  late final AnimationController _tabController;
+  final ValueNotifier<int> _activeTab = ValueNotifier<int>(0);
 
   @override
   void initState() {
     super.initState();
     _accentColor = widget.accentColor;
-    _tabController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 250),
-      value: 1.0,
-    );
     if (widget.user != null) {
       _user = widget.user;
       _userLoading = false;
@@ -122,15 +122,15 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
     } catch (_) {}
   }
 
+  void _activateTab(int index) {
+    setState(() => _currentIndex = index);
+    _activeTab.value = index;
+    if (index == 2) _refreshUser();
+  }
+
   Future<void> _switchTab(int index) async {
     if (index == _currentIndex) return;
-    await _tabController.reverse();
-    setState(() {
-      _currentIndex = index;
-      _builtTabs.add(index);
-    });
-    _tabController.forward();
-    if (index == 2) _refreshUser();
+    _activateTab(index);
   }
 
   void _onUserUpdated(UserModel u) {
@@ -142,9 +142,21 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
 
   @override
   void dispose() {
-    _tabController.dispose();
+    _activeTab.dispose();
     super.dispose();
   }
+
+  List<Widget> _tabChildren(UserModel user) => [
+        HomePage(liquidGlass: widget.liquidGlass),
+        ClickerPage(activeTab: _activeTab),
+        ProfilePage(
+          key: const ValueKey('profile_stable'),
+          user: user,
+          accentColor: _accentColor,
+          onUserUpdated: _onUserUpdated,
+          activeTab: _activeTab,
+        ),
+      ];
 
   @override
   Widget build(BuildContext context) {
@@ -157,71 +169,64 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
     }
 
     final user = _user!;
-    final content = _buildCurrentStack(user);
     final isDesktop = MediaQuery.of(context).size.width >= 900;
 
     if (isDesktop) {
       return _DesktopShell(
         currentIndex: _currentIndex,
-        vpnConnected: _vpnConnected,
         accentColor: _accentColor,
         onTap: _switchTab,
-        child: content,
+        child: IndexedStack(
+          index: _currentIndex,
+          children: _tabChildren(user),
+        ),
       );
     }
 
     return Scaffold(
       backgroundColor: AppColors.darkBg,
-      body: content,
+      body: IndexedStack(
+        index: _currentIndex,
+        children:
+            _tabChildren(user).map((w) => _KeepAliveTab(child: w)).toList(),
+      ),
       bottomNavigationBar: _WarpNavBar(
         currentIndex: _currentIndex,
-        vpnConnected: _vpnConnected,
         accentColor: _accentColor,
         onTap: _switchTab,
       ),
     );
   }
+}
 
-  Widget _buildCurrentStack(UserModel user) {
-    return AnimatedBuilder(
-      animation: _tabController,
-      builder: (context, child) => Opacity(
-        opacity: _tabController.value.clamp(0.0, 1.0),
-        child: child,
-      ),
-      child: IndexedStack(
-        index: _currentIndex,
-        children: List.generate(3, (index) {
-          if (!_builtTabs.contains(index)) {
-            return const SizedBox.shrink();
-          }
+class _KeepAliveTab extends StatefulWidget {
+  final Widget child;
+  const _KeepAliveTab({required this.child});
 
-          return switch (index) {
-            0 => const HomePage(),
-            1 => const ClickerPage(),
-            _ => ProfilePage(
-                key: const ValueKey('profile_stable'),
-                user: user,
-                accentColor: _accentColor,
-                onUserUpdated: _onUserUpdated,
-              ),
-          };
-        }),
-      ),
-    );
+  @override
+  State<_KeepAliveTab> createState() => _KeepAliveTabState();
+}
+
+class _KeepAliveTabState extends State<_KeepAliveTab>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return widget.child;
   }
 }
 
 class _DesktopShell extends StatelessWidget {
   final int currentIndex;
-  final bool vpnConnected;
   final Color accentColor;
   final ValueChanged<int> onTap;
   final Widget child;
 
   const _DesktopShell({
     required this.currentIndex,
-    required this.vpnConnected,
     required this.accentColor,
     required this.onTap,
     required this.child,
@@ -239,7 +244,6 @@ class _DesktopShell extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(22, 22, 0, 22),
                 child: _DesktopNav(
                   currentIndex: currentIndex,
-                  vpnConnected: vpnConnected,
                   accentColor: accentColor,
                   onTap: onTap,
                 ),
@@ -266,13 +270,11 @@ class _DesktopShell extends StatelessWidget {
 
 class _DesktopNav extends StatelessWidget {
   final int currentIndex;
-  final bool vpnConnected;
   final Color accentColor;
   final ValueChanged<int> onTap;
 
   const _DesktopNav({
     required this.currentIndex,
-    required this.vpnConnected,
     required this.accentColor,
     required this.onTap,
   });
@@ -342,7 +344,6 @@ class _DesktopNav extends StatelessWidget {
                 icon: Icons.shield_rounded,
                 label: 'VPN',
                 selected: currentIndex == 0,
-                badge: vpnConnected,
                 accentColor: accentColor,
                 onTap: () => onTap(0),
               ),
@@ -382,7 +383,6 @@ class _DesktopNavItem extends StatelessWidget {
   final IconData icon;
   final String label;
   final bool selected;
-  final bool badge;
   final Color accentColor;
   final VoidCallback onTap;
 
@@ -392,7 +392,6 @@ class _DesktopNavItem extends StatelessWidget {
     required this.selected,
     required this.accentColor,
     required this.onTap,
-    this.badge = false,
   });
 
   @override
@@ -420,27 +419,9 @@ class _DesktopNavItem extends StatelessWidget {
           ),
           child: Row(
             children: [
-              Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  Icon(icon,
-                      color: selected ? accentColor : AppColors.darkTextSub,
-                      size: 22),
-                  if (badge)
-                    Positioned(
-                      top: -3,
-                      right: -4,
-                      child: Container(
-                        width: 8,
-                        height: 8,
-                        decoration: const BoxDecoration(
-                          color: AppColors.connected,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
+              Icon(icon,
+                  color: selected ? accentColor : AppColors.darkTextSub,
+                  size: 22),
               const SizedBox(width: 12),
               Text(
                 label,
@@ -459,18 +440,103 @@ class _DesktopNavItem extends StatelessWidget {
   }
 }
 
-class _WarpNavBar extends StatelessWidget {
+class _WarpNavBar extends StatefulWidget {
   final int currentIndex;
-  final bool vpnConnected;
   final Color accentColor;
   final ValueChanged<int> onTap;
 
   const _WarpNavBar({
     required this.currentIndex,
-    required this.vpnConnected,
     required this.accentColor,
     required this.onTap,
   });
+
+  @override
+  State<_WarpNavBar> createState() => _WarpNavBarState();
+}
+
+class _WarpNavBarState extends State<_WarpNavBar>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _slideController;
+  double _visualIndex = 0;
+  double _dragStartIndex = 0;
+  double _dragDistance = 0;
+  bool _dragging = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _visualIndex = widget.currentIndex.toDouble();
+    _slideController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 420),
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant _WarpNavBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_dragging && oldWidget.currentIndex != widget.currentIndex) {
+      _animateLensTo(widget.currentIndex.toDouble());
+    }
+  }
+
+  Future<void> _animateLensTo(double target) async {
+    _slideController.stop();
+    final start = _visualIndex;
+    final animation = Tween<double>(begin: start, end: target).animate(
+      CurvedAnimation(
+        parent: _slideController,
+        curve: Curves.easeOutBack,
+      ),
+    );
+    void update() {
+      if (mounted) setState(() => _visualIndex = animation.value);
+    }
+
+    animation.addListener(update);
+    _slideController.value = 0;
+    await _slideController.forward();
+    animation.removeListener(update);
+    if (mounted) setState(() => _visualIndex = target);
+  }
+
+  void _onDragStart(DragStartDetails details) {
+    _slideController.stop();
+    _dragging = true;
+    _dragDistance = 0;
+    _dragStartIndex = widget.currentIndex.toDouble();
+  }
+
+  void _onDragUpdate(DragUpdateDetails details, double itemWidth) {
+    _dragDistance += details.primaryDelta ?? 0;
+    setState(() {
+      _visualIndex =
+          (_dragStartIndex + _dragDistance / itemWidth).clamp(0.0, 2.0);
+    });
+  }
+
+  void _onDragEnd(DragEndDetails details) {
+    final velocity = details.primaryVelocity ?? 0;
+    var target = _dragStartIndex.round();
+    if (_dragDistance > 22 || velocity > 180) {
+      target++;
+    } else if (_dragDistance < -22 || velocity < -180) {
+      target--;
+    } else {
+      target = _visualIndex.round();
+    }
+    target = target.clamp(0, 2);
+    _dragging = false;
+    widget.onTap(target);
+    _animateLensTo(target.toDouble());
+  }
+
+  @override
+  void dispose() {
+    _slideController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -504,32 +570,120 @@ class _WarpNavBar extends StatelessWidget {
                 ),
               ],
             ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: [
-                _NavItem(
-                  icon: Icons.shield_rounded,
-                  label: 'VPN',
-                  isSelected: currentIndex == 0,
-                  badge: vpnConnected,
-                  accentColor: accentColor,
-                  onTap: () => onTap(0),
-                ),
-                _NavItem(
-                  icon: Icons.touch_app_rounded,
-                  label: 'Клик',
-                  isSelected: currentIndex == 1,
-                  accentColor: accentColor,
-                  onTap: () => onTap(1),
-                ),
-                _NavItem(
-                  icon: Icons.person_rounded,
-                  label: 'Профиль',
-                  isSelected: currentIndex == 2,
-                  accentColor: accentColor,
-                  onTap: () => onTap(2),
-                ),
-              ],
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final itemWidth = constraints.maxWidth / 3;
+                const lensSize = 42.0;
+                final lensLeft =
+                    itemWidth * (_visualIndex + 0.5) - lensSize / 2;
+                return GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onHorizontalDragStart: _onDragStart,
+                  onHorizontalDragUpdate: (details) =>
+                      _onDragUpdate(details, itemWidth),
+                  onHorizontalDragEnd: _onDragEnd,
+                  child: Stack(
+                    children: [
+                      Positioned(
+                        left: lensLeft,
+                        top: 3,
+                        width: lensSize,
+                        height: lensSize,
+                        child: IgnorePointer(
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              LiquidGlassButton(
+                                size: lensSize,
+                                stateColor: widget.accentColor,
+                                stateMix: 0.82,
+                                pulse: _dragging ? 0.18 : 0,
+                                fallback: Container(
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: widget.accentColor
+                                        .withValues(alpha: 0.16),
+                                  ),
+                                ),
+                                child: const SizedBox.shrink(),
+                              ),
+                              AnimatedContainer(
+                                duration: const Duration(milliseconds: 160),
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: Colors.white.withValues(
+                                      alpha: _dragging ? 0.055 : 0.035),
+                                  border: Border.all(
+                                    color: widget.accentColor.withValues(
+                                        alpha: _dragging ? 0.95 : 0.82),
+                                    width: _dragging ? 2.0 : 1.6,
+                                  ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: widget.accentColor.withValues(
+                                          alpha: _dragging ? 0.38 : 0.28),
+                                      blurRadius: _dragging ? 18 : 13,
+                                      spreadRadius: _dragging ? 1.2 : 0.4,
+                                    ),
+                                    BoxShadow(
+                                      color:
+                                          Colors.white.withValues(alpha: 0.16),
+                                      blurRadius: 2,
+                                      offset: const Offset(-1, -1),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Positioned(
+                                left: 8,
+                                right: 8,
+                                top: 5,
+                                height: 8,
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(20),
+                                    gradient: LinearGradient(
+                                      colors: [
+                                        Colors.white.withValues(alpha: 0.42),
+                                        Colors.white.withValues(alpha: 0.04),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      Row(
+                        children: [
+                          _NavItem(
+                            icon: Icons.shield_rounded,
+                            label: 'VPN',
+                            isSelected: widget.currentIndex == 0,
+                            accentColor: widget.accentColor,
+                            onTap: () => widget.onTap(0),
+                          ),
+                          _NavItem(
+                            icon: Icons.touch_app_rounded,
+                            label: 'Клик',
+                            isSelected: widget.currentIndex == 1,
+                            accentColor: widget.accentColor,
+                            onTap: () => widget.onTap(1),
+                          ),
+                          _NavItem(
+                            icon: Icons.person_rounded,
+                            label: 'Профиль',
+                            isSelected: widget.currentIndex == 2,
+                            accentColor: widget.accentColor,
+                            onTap: () => widget.onTap(2),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                );
+              },
             ),
           ),
         ),
@@ -542,7 +696,6 @@ class _NavItem extends StatelessWidget {
   final IconData icon;
   final String label;
   final bool isSelected;
-  final bool badge;
   final Color accentColor;
   final VoidCallback onTap;
 
@@ -552,82 +705,48 @@ class _NavItem extends StatelessWidget {
     required this.isSelected,
     required this.accentColor,
     required this.onTap,
-    this.badge = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: SizedBox(
-        width: 80,
-        height: 64,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Stack(
-              clipBehavior: Clip.none,
-              children: [
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 250),
-                  padding: const EdgeInsets.all(7),
-                  decoration: BoxDecoration(
-                    color: isSelected
-                        ? Colors.white.withValues(alpha: 0.14)
-                        : Colors.transparent,
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(
-                      color: isSelected
-                          ? Colors.white.withValues(alpha: 0.16)
-                          : Colors.transparent,
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: SizedBox(
+          height: 64,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              SizedBox(
+                width: 42,
+                height: 42,
+                child: Center(
+                  child: AnimatedScale(
+                    scale: isSelected ? 1.08 : 1,
+                    duration: const Duration(milliseconds: 300),
+                    curve: Curves.easeOutBack,
+                    child: Icon(
+                      icon,
+                      size: 20,
+                      color: isSelected ? accentColor : AppColors.darkTextSub,
                     ),
-                    boxShadow: isSelected
-                        ? [
-                            BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.16),
-                                blurRadius: 12,
-                                offset: const Offset(0, 6))
-                          ]
-                        : null,
-                  ),
-                  child: Icon(
-                    icon,
-                    size: 20,
-                    color: isSelected ? accentColor : AppColors.darkTextSub,
                   ),
                 ),
-                if (badge)
-                  Positioned(
-                    top: -2,
-                    right: -2,
-                    child: Container(
-                      width: 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        color: AppColors.connected,
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                              color: AppColors.connected.withValues(alpha: 0.6),
-                              blurRadius: 4)
-                        ],
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 2),
-            Text(
-              label,
-              style: TextStyle(
-                fontFamily: 'Rajdhani',
-                fontSize: 10,
-                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w400,
-                color: isSelected ? accentColor : AppColors.darkTextSub,
               ),
-            ),
-          ],
+              const SizedBox(height: 1),
+              AnimatedDefaultTextStyle(
+                duration: const Duration(milliseconds: 250),
+                style: TextStyle(
+                  fontFamily: 'Rajdhani',
+                  fontSize: 10,
+                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w400,
+                  color: isSelected ? accentColor : AppColors.darkTextSub,
+                ),
+                child: Text(label),
+              ),
+            ],
+          ),
         ),
       ),
     );
