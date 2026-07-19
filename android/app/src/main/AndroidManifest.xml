@@ -1,11 +1,17 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.BIND_QUICK_SETTINGS_TILE" />
+    <uses-permission
+        android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:node="remove" />
+    <uses-permission
+        android:name="android.permission.RECEIVE_BOOT_COMPLETED"
+        tools:node="remove" />
 
     <application
         android:label="End VPN"
@@ -42,7 +48,11 @@
         <service
             android:name=".VpnNotificationService"
             android:exported="false"
-            android:foregroundServiceType="specialUse" />
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="vpn_connection_status_notification" />
+        </service>
 
         <service
             android:name=".XrayVpnService"
@@ -84,6 +94,18 @@
                 <action android:name="com.example.endvpn.VPN_DISCONNECT" />
             </intent-filter>
         </receiver>
+
+        <receiver
+            android:name="com.tecclub.flutter_singbox.bg.BootReceiver"
+            tools:node="remove" />
+
+        <receiver
+            android:name="com.tecclub.flutter_singbox.bg.AppChangeReceiver"
+            tools:node="remove" />
+
+        <service
+            android:name="com.tecclub.flutter_singbox.bg.TileService"
+            tools:node="remove" />
 
         <meta-data
             android:name="flutterEmbedding"
