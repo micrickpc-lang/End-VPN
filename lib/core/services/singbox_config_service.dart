@@ -18,6 +18,9 @@ class SingboxSubscriptionResult {
     required this.selectedTag,
     required this.configJson,
   });
+
+  int get usableServerCount =>
+      servers.where((server) => server.supported).length;
 }
 
 class SingboxConfigService {
@@ -170,6 +173,11 @@ class SingboxConfigService {
         'shortId': params['sid'] ?? '',
         'spiderX': params['spx'] ?? '/',
       };
+    } else if (params['security'] == 'tls') {
+      stream['tlsSettings'] = {
+        'serverName': params['sni'] ?? uri.host,
+        'fingerprint': params['fp'] ?? 'chrome',
+      };
     }
     return jsonEncode({
       'log': {'loglevel': 'warning'},
@@ -222,8 +230,11 @@ class SingboxConfigService {
       port: int.tryParse(proxy['port']?.toString() ?? '') ?? 443,
       queryParameters: {
         'type': 'xhttp',
-        'security':
-            proxy['tls'] == true || reality.isNotEmpty ? 'reality' : 'none',
+        'security': reality.isNotEmpty
+            ? 'reality'
+            : proxy['tls'] == true
+                ? 'tls'
+                : 'none',
         'sni': proxy['servername']?.toString() ?? '',
         'fp': proxy['client-fingerprint']?.toString() ?? 'chrome',
         'pbk': reality['public-key']?.toString() ?? '',

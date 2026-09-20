@@ -14,7 +14,11 @@ class VpnBroadcastReceiver : BroadcastReceiver() {
                 connectCallback?.invoke()
             }
             XrayVpnService.ACTION_STATUS -> {
-                statusCallback?.invoke(intent.getStringExtra("status").orEmpty())
+                statusCallback?.invoke(
+                    intent.getStringExtra("status").orEmpty(),
+                    intent.getStringExtra("error"),
+                    intent.getLongExtra(XrayVpnService.EXTRA_REQUEST_ID, -1L),
+                )
             }
         }
     }
@@ -23,7 +27,6 @@ class VpnBroadcastReceiver : BroadcastReceiver() {
         const val ACTION_TILE_CONNECT = "com.example.endvpn.TILE_CONNECT"
         var disconnectCallback: (() -> Unit)? = null
         var connectCallback: (() -> Unit)? = null
-        var statusCallback: ((String) -> Unit)? = null
+        var statusCallback: ((String, String?, Long) -> Unit)? = null
     }
 }
-

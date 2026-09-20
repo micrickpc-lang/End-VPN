@@ -16,6 +16,7 @@ import libv2ray.Libv2ray
 class XrayVpnService : VpnService() {
     private var vpnInterface: ParcelFileDescriptor? = null
     private var controller: CoreController? = null
+    private var requestId: Long = -1L
 
     override fun onCreate() {
         super.onCreate()
@@ -31,8 +32,9 @@ class XrayVpnService : VpnService() {
         }
         val config = intent?.getStringExtra(EXTRA_CONFIG) ?: return START_NOT_STICKY
         val server = intent.getStringExtra(EXTRA_SERVER).orEmpty()
-        startForeground(NOTIFICATION_ID, buildNotification(server))
+        requestId = intent.getLongExtra(EXTRA_REQUEST_ID, -1L)
         try {
+            startForeground(NOTIFICATION_ID, buildNotification(server))
             stopCore()
             vpnInterface = Builder()
                 .setSession(if (server.isEmpty()) "End VPN" else server)
@@ -50,7 +52,7 @@ class XrayVpnService : VpnService() {
             sendStatus("Started")
         } catch (error: Exception) {
             sendStatus("Error", error.message)
-            stopTunnel()
+            stopTunnel(sendStopped = false)
         }
         return START_STICKY
     }
@@ -69,16 +71,17 @@ class XrayVpnService : VpnService() {
         vpnInterface = null
     }
 
-    private fun stopTunnel() {
+    private fun stopTunnel(sendStopped: Boolean = true) {
         stopCore()
-        sendStatus("Stopped")
+        if (sendStopped) sendStatus("Stopped")
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
     private fun sendStatus(status: String, error: String? = null) {
         sendBroadcast(Intent(ACTION_STATUS).setPackage(packageName)
-            .putExtra("status", status).putExtra("error", error))
+            .putExtra("status", status).putExtra("error", error)
+            .putExtra(EXTRA_REQUEST_ID, requestId))
     }
 
     private fun buildNotification(server: String): android.app.Notification {
@@ -140,6 +143,7 @@ class XrayVpnService : VpnService() {
         const val ACTION_STATUS = "com.example.endvpn.XRAY_STATUS"
         const val EXTRA_CONFIG = "config"
         const val EXTRA_SERVER = "server"
+        const val EXTRA_REQUEST_ID = "requestId"
         const val CHANNEL_ID = "endvpn_xray"
         const val NOTIFICATION_ID = 1338
         private const val XRAY_BASE_KEY = "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA"

@@ -1,5 +1,6 @@
 package com.example.endvpn
 
+import android.annotation.SuppressLint
 import android.app.PendingIntent
 import android.content.ComponentName
 import android.content.Context
@@ -31,19 +32,21 @@ class VpnQuickTileService : TileService() {
     private fun updateTile() {
         qsTile?.let { tile ->
             tile.label = "EndVPN"
-            tile.subtitle = if (VpnBridge.isConnected) {
-                if (VpnBridge.serverName.isNotEmpty()) VpnBridge.serverName else "Connected"
-            } else {
-                "Connect"
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                tile.subtitle = if (VpnBridge.isConnected) {
+                    if (VpnBridge.serverName.isNotEmpty()) VpnBridge.serverName else "Connected"
+                } else {
+                    "Connect"
+                }
             }
             tile.state = if (VpnBridge.isConnected) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                tile.icon = Icon.createWithResource(this, resources.getIdentifier("ic_launcher", "mipmap", packageName))
-            }
+            tile.icon = Icon.createWithResource(this, R.mipmap.ic_launcher)
             tile.updateTile()
         }
     }
 
+    // The Intent overload is required on Android versions before API 34.
+    @SuppressLint("StartActivityAndCollapseDeprecated")
     private fun openAppForConnect() {
         val intent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
             action = VpnBroadcastReceiver.ACTION_TILE_CONNECT
@@ -59,7 +62,6 @@ class VpnQuickTileService : TileService() {
             )
             startActivityAndCollapse(pendingIntent)
         } else {
-            @Suppress("DEPRECATION")
             startActivityAndCollapse(intent)
         }
     }
@@ -76,12 +78,10 @@ class VpnQuickTileService : TileService() {
         private const val KEY_PENDING_ACTION = "pending_action"
 
         fun requestTileRefresh(context: Context) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                requestListeningState(
-                    context,
-                    ComponentName(context, VpnQuickTileService::class.java)
-                )
-            }
+            requestListeningState(
+                context,
+                ComponentName(context, VpnQuickTileService::class.java)
+            )
         }
     }
 }

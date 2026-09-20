@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:ui';
 import 'dart:convert';
-import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_singbox_vpn/flutter_singbox.dart';
@@ -13,6 +12,7 @@ import 'package:endvpn/core/services/remnawave_service.dart';
 import 'package:endvpn/core/services/singbox_config_service.dart';
 import 'package:endvpn/core/services/vpn_tile_service.dart';
 import 'package:endvpn/core/services/windows_vpn_service.dart';
+import 'package:endvpn/core/services/vpn_speed_service.dart';
 import 'package:endvpn/core/services/ad_service.dart';
 import 'package:endvpn/core/models/user_model.dart';
 import 'package:endvpn/shared/theme/app_theme.dart';
@@ -139,10 +139,12 @@ class _HomePageState extends State<HomePage>
   final _remnawave = RemnawaveService();
   final _ads = AdService();
   final _singboxConfig = SingboxConfigService();
-  final _subscriptionDio = Dio(BaseOptions(
-    connectTimeout: const Duration(seconds: 10),
-    receiveTimeout: const Duration(seconds: 10),
-  ));
+  final _subscriptionDio = Dio(
+    BaseOptions(
+      connectTimeout: const Duration(seconds: 10),
+      receiveTimeout: const Duration(seconds: 10),
+    ),
+  );
 
   bool _isConnected = false;
   bool _isConnecting = false;
@@ -156,14 +158,12 @@ class _HomePageState extends State<HomePage>
   final _downloadSpeed = ValueNotifier<String>('0 Mbps');
   String _ping = '--';
   Timer? _pingTimer;
-  Timer? _desktopTrafficTimer;
   Timer? _nativeStartupTimer;
   final _windowsVpn = WindowsVpnService();
 
   Timer? _trafficDebounce;
   String _pendingDown = '0 Mbps';
   String _pendingUp = '0 Mbps';
-  final _speedRandom = Random();
   double _displayDownMbps = 0;
   double _displayUpMbps = 0;
 
@@ -189,43 +189,14 @@ class _HomePageState extends State<HomePage>
     return null;
   }
 
-  double _speedToMbps(dynamic raw) {
-    if (raw == null) return 0;
-    if (raw is int) return raw * 8 / 1000000;
-    if (raw is double) return raw * 8 / 1000000;
-    if (raw is String) {
-      final source = raw.trim().replaceAll(',', '.');
-      final match = RegExp(r'([\\d.]+)\\s*([a-zA-Z/]+)?').firstMatch(source);
-      if (match == null) return double.tryParse(source) ?? 0;
-      final value = double.tryParse(match.group(1) ?? '') ?? 0;
-      final unit = (match.group(2) ?? '').toLowerCase();
-      if (unit.contains('gb')) return value * 8000;
-      if (unit.contains('mb/s') || unit.contains('mib')) return value * 8;
-      if (unit.contains('kb')) return value * 0.008;
-      if (unit.contains('b/s')) return value * 0.000008;
-      if (unit.contains('mbit') || unit.contains('mbps')) {
-        return value;
-      }
-      return value;
-    }
-    return 0;
-  }
-
   String _formatMbps(double value) {
     if (value <= 0) return '0 Mbps';
     return '${value.toStringAsFixed(1)} Mbps';
   }
 
-  double _nextDisplayMbps(dynamic raw, double current) {
+  double _nextDisplayMbps(dynamic raw) {
     if (!_isConnected) return 0;
-    final real = _speedToMbps(raw);
-    if (real >= 12) return real;
-
-    final target = 12 + _speedRandom.nextDouble() * 18;
-    if (current < 12 || current > 30) return target;
-    final drift = (_speedRandom.nextDouble() - 0.5) * 1.4;
-    final next = current + ((target - current) * 0.32) + drift;
-    return next.clamp(12, 30);
+    return VpnSpeedService.toMbps(raw);
   }
 
   Map<String, dynamic>? _selectedOutbound() {
@@ -235,9 +206,12 @@ class _HomePageState extends State<HomePage>
     try {
       final config = jsonDecode(configRaw) as Map<String, dynamic>;
       final outbounds = (config['outbounds'] as List?) ?? [];
-      final currentTag = _vpn.servers.firstWhere(
-          (s) => s['name'] == _vpn.serverLocation,
-          orElse: () => {})['tag'] as String?;
+      final currentTag =
+          _vpn.servers.firstWhere(
+                (s) => s['name'] == _vpn.serverLocation,
+                orElse: () => {},
+              )['tag']
+              as String?;
       if (currentTag == null) return null;
 
       for (final outbound in outbounds) {
@@ -258,8 +232,11 @@ class _HomePageState extends State<HomePage>
 
     try {
       final sw = Stopwatch()..start();
-      final socket =
-          await Socket.connect(host, port, timeout: const Duration(seconds: 3));
+      final socket = await Socket.connect(
+        host,
+        port,
+        timeout: const Duration(seconds: 3),
+      );
       sw.stop();
       socket.destroy();
       if (mounted) setState(() => _ping = '${sw.elapsedMilliseconds} ms');
@@ -271,30 +248,16 @@ class _HomePageState extends State<HomePage>
   void _startPingTimer() {
     _pingTimer?.cancel();
     _measurePing();
-    _pingTimer =
-        Timer.periodic(const Duration(seconds: 30), (_) => _measurePing());
+    _pingTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => _measurePing(),
+    );
   }
 
   void _stopPingTimer() {
     _pingTimer?.cancel();
     _pingTimer = null;
     if (mounted) setState(() => _ping = '--');
-  }
-
-  void _startDesktopTrafficTimer() {
-    _desktopTrafficTimer?.cancel();
-    _desktopTrafficTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted || !_isConnected) return;
-      _displayDownMbps = _nextDisplayMbps(0, _displayDownMbps);
-      _displayUpMbps = _nextDisplayMbps(0, _displayUpMbps);
-      _downloadSpeed.value = _formatMbps(_displayDownMbps);
-      _uploadSpeed.value = _formatMbps(_displayUpMbps);
-    });
-  }
-
-  void _stopDesktopTrafficTimer() {
-    _desktopTrafficTimer?.cancel();
-    _desktopTrafficTimer = null;
   }
 
   Future<void> _startWindowsVpnCore([String? configOverride]) async {
@@ -362,25 +325,28 @@ class _HomePageState extends State<HomePage>
       _usingXray = false;
       _statusText = 'ERROR';
     });
-    _stopDesktopTrafficTimer();
     _stopPingTimer();
     _connectController.reverse();
     _pulseController.stop();
     _pulseController.value = 0;
     VpnTileService.instance.updateState(connected: false);
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(vpnState.errorMessage ?? 'VPN соединение прервано'),
-      backgroundColor: AppColors.crimson,
-    ));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(vpnState.errorMessage ?? 'VPN соединение прервано'),
+        backgroundColor: AppColors.crimson,
+      ),
+    );
   }
 
   void _showNativeVpnStartupError([Object? error]) {
     if (!mounted || _nativeStartupFailureReported) return;
     _nativeStartupFailureReported = true;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(_nativeVpnErrorMessage(error)),
-      backgroundColor: AppColors.crimson,
-    ));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(_nativeVpnErrorMessage(error)),
+        backgroundColor: AppColors.crimson,
+      ),
+    );
   }
 
   @override
@@ -388,10 +354,14 @@ class _HomePageState extends State<HomePage>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    _pulseController =
-        AnimationController(vsync: this, duration: const Duration(seconds: 3));
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 3),
+    );
     _connectController = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 600));
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    );
 
     _vpn.init();
     LiquidGlassButton.ensureLoaded();
@@ -412,12 +382,20 @@ class _HomePageState extends State<HomePage>
     VpnTileService.instance.onXrayStatus = (status) {
       if (!mounted || !_usingXray) return;
       final normalized = status.toLowerCase();
-      if (normalized != 'started' && normalized != 'stopped') return;
+      if (normalized != 'started' &&
+          normalized != 'stopped' &&
+          normalized != 'error') {
+        return;
+      }
       final connected = normalized == 'started';
       setState(() {
         _isConnected = connected;
         _isConnecting = false;
-        _statusText = connected ? 'CONNECTED' : 'DISCONNECTED';
+        _statusText = connected
+            ? 'CONNECTED'
+            : normalized == 'error'
+            ? 'ERROR'
+            : 'DISCONNECTED';
         if (!connected) _usingXray = false;
       });
       if (connected) {
@@ -426,6 +404,18 @@ class _HomePageState extends State<HomePage>
       } else {
         _connectController.reverse();
         _pulseController.stop();
+        VpnTileService.instance.updateState(connected: false);
+        if (normalized == 'error') {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                VpnTileService.instance.lastXrayError ??
+                    'VPN core stopped unexpectedly',
+              ),
+              backgroundColor: AppColors.crimson,
+            ),
+          );
+        }
       }
     };
 
@@ -434,8 +424,8 @@ class _HomePageState extends State<HomePage>
     _statusText = _isConnected
         ? 'CONNECTED'
         : _isConnecting
-            ? 'CONNECTING...'
-            : 'DISCONNECTED';
+        ? 'CONNECTING...'
+        : 'DISCONNECTED';
 
     if (_isConnected) {
       _connectController.value = 1.0;
@@ -454,7 +444,8 @@ class _HomePageState extends State<HomePage>
     _statusSub = _vpn.statusStream.listen((status) {
       if (!mounted) return;
       final s = (status['status'] as String? ?? '').toLowerCase();
-      final failedDuringStartup = _hasNativeVpn &&
+      final failedDuringStartup =
+          _hasNativeVpn &&
           (_isConnecting ||
               _nativeStartupTimer?.isActive == true ||
               _vpn.isConnecting);
@@ -469,8 +460,10 @@ class _HomePageState extends State<HomePage>
           _connectController.forward();
           _pulseController.repeat(reverse: true);
           _startPingTimer();
-          VpnTileService.instance
-              .updateState(connected: true, serverName: _vpn.serverLocation);
+          VpnTileService.instance.updateState(
+            connected: true,
+            serverName: _vpn.serverLocation,
+          );
         } else if (s == 'stopped' || s == 'disconnected') {
           if (_isSwitchingServer) {
             _isConnected = false;
@@ -506,8 +499,8 @@ class _HomePageState extends State<HomePage>
       final downRaw =
           stats['downlinkSpeed'] ?? stats['formattedDownlinkSpeed'] ?? 0;
       final upRaw = stats['uplinkSpeed'] ?? stats['formattedUplinkSpeed'] ?? 0;
-      _displayDownMbps = _nextDisplayMbps(downRaw, _displayDownMbps);
-      _displayUpMbps = _nextDisplayMbps(upRaw, _displayUpMbps);
+      _displayDownMbps = _nextDisplayMbps(downRaw);
+      _displayUpMbps = _nextDisplayMbps(upRaw);
       _pendingDown = _formatMbps(_displayDownMbps);
       _pendingUp = _formatMbps(_displayUpMbps);
       _trafficDebounce ??= Timer(const Duration(seconds: 1), () {
@@ -595,7 +588,10 @@ class _HomePageState extends State<HomePage>
   static const _spKeySubUa = 'sub_ua';
 
   Future<SingboxSubscriptionResult?> _tryFetchWithUa(
-      String subUrl, String userAgent, String? currentTag) async {
+    String subUrl,
+    String userAgent,
+    String? currentTag,
+  ) async {
     try {
       final resp = await _subscriptionDio.get<String>(
         subUrl,
@@ -630,7 +626,7 @@ class _HomePageState extends State<HomePage>
 
       if (cachedUa != null && _subUserAgents.contains(cachedUa)) {
         final candidate = await _tryFetchWithUa(subUrl, cachedUa, currentTag);
-        if (candidate != null && candidate.servers.isNotEmpty) {
+        if (candidate != null && candidate.usableServerCount > 0) {
           subscription = candidate;
           winningUa = cachedUa;
         }
@@ -639,12 +635,15 @@ class _HomePageState extends State<HomePage>
       if (subscription == null) {
         for (final userAgent in _subUserAgents) {
           if (userAgent == cachedUa) continue;
-          final candidate =
-              await _tryFetchWithUa(subUrl, userAgent, currentTag);
-          if (candidate == null) continue;
+          final candidate = await _tryFetchWithUa(
+            subUrl,
+            userAgent,
+            currentTag,
+          );
+          if (candidate == null || candidate.usableServerCount == 0) continue;
           if (subscription == null ||
-              candidate.servers.length > subscription.servers.length ||
-              (candidate.servers.length == subscription.servers.length &&
+              candidate.usableServerCount > subscription.usableServerCount ||
+              (candidate.usableServerCount == subscription.usableServerCount &&
                   candidate.outbounds.length > subscription.outbounds.length)) {
             subscription = candidate;
             winningUa = userAgent;
@@ -661,17 +660,22 @@ class _HomePageState extends State<HomePage>
       }
 
       await _vpn.saveConfig(loadedSubscription.configJson);
-      final loadedServers =
-          loadedSubscription.servers.map((server) => server.toJson()).toList();
+      final loadedServers = loadedSubscription.servers
+          .map((server) => server.toJson())
+          .toList();
       await _vpn.saveServers(loadedServers);
 
       if (mounted) {
         setState(() {
           _vpn.servers = loadedServers;
           if (_vpn.serverLocation.isEmpty ||
-              !loadedSubscription.servers
-                  .any((server) => server.name == _vpn.serverLocation)) {
-            _vpn.serverLocation = loadedSubscription.servers.first.name;
+              !loadedSubscription.servers.any(
+                (server) =>
+                    server.name == _vpn.serverLocation && server.supported,
+              )) {
+            _vpn.serverLocation = loadedSubscription.servers
+                .firstWhere((server) => server.supported)
+                .name;
           }
         });
         await _vpn.saveServerLocation(_vpn.serverLocation);
@@ -688,8 +692,16 @@ class _HomePageState extends State<HomePage>
     if (premium == null) return;
     _isPremiumCached = premium;
     if (!premium) {
-      await _ads.init();
+      _preloadAd();
     }
+  }
+
+  void _preloadAd() {
+    unawaited(
+      _ads.init().catchError((Object error) {
+        debugPrint('Ad preload error: $error');
+      }),
+    );
   }
 
   Future<void> _setPremiumStatus(bool premium) async {
@@ -698,14 +710,15 @@ class _HomePageState extends State<HomePage>
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_spKeyPremium, premium);
     if (!premium) {
-      await _ads.init();
+      _preloadAd();
     }
   }
 
   Future<bool?> _checkIsPremium({bool forceRefresh = false}) async {
     final cached = _isPremiumCached;
     final checkedAt = _premiumCheckedAt;
-    final cacheIsFresh = checkedAt != null &&
+    final cacheIsFresh =
+        checkedAt != null &&
         DateTime.now().difference(checkedAt) < const Duration(seconds: 20);
     if (!forceRefresh && cached != null) return cached;
     if (forceRefresh && cached == true && cacheIsFresh) return true;
@@ -739,7 +752,6 @@ class _HomePageState extends State<HomePage>
     } else {
       await _stopWindowsVpnCore();
     }
-    _stopDesktopTrafficTimer();
     _stopPingTimer();
     _nativeStartupTimer?.cancel();
     if (!mounted) return;
@@ -779,9 +791,12 @@ class _HomePageState extends State<HomePage>
     }
 
     if (_vpn.singboxConfig == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
           content: Text('VPN config is missing'),
-          backgroundColor: AppColors.crimson));
+          backgroundColor: AppColors.crimson,
+        ),
+      );
       return;
     }
 
@@ -793,11 +808,12 @@ class _HomePageState extends State<HomePage>
       if (!watched) return;
     }
 
-    final selectedServer =
-        _vpn.servers.cast<Map<String, dynamic>?>().firstWhere(
-              (server) => server?['name'] == _vpn.serverLocation,
-              orElse: () => null,
-            );
+    final selectedServer = _vpn.servers
+        .cast<Map<String, dynamic>?>()
+        .firstWhere(
+          (server) => server?['name'] == _vpn.serverLocation,
+          orElse: () => null,
+        );
     final xrayConfig = selectedServer?['xrayConfig']?.toString() ?? '';
     if (xrayConfig.isNotEmpty) {
       setState(() {
@@ -805,21 +821,33 @@ class _HomePageState extends State<HomePage>
         _statusText = 'CONNECTING...';
       });
       var started = false;
+      String? startError;
       try {
         if (_hasNativeVpn) {
-          started = await VpnTileService.instance
-              .startXray(xrayConfig, _vpn.serverLocation);
+          started = await VpnTileService.instance.startXray(
+            xrayConfig,
+            _vpn.serverLocation,
+          );
         } else {
           await _startWindowsXrayCore(xrayConfig);
           started = true;
         }
       } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(_windowsVpnErrorMessage(e)),
+        startError = _hasNativeVpn
+            ? 'VPN start error: $e'
+            : _windowsVpnErrorMessage(e);
+      }
+      if (!started && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              startError ??
+                  VpnTileService.instance.lastXrayError ??
+                  'VPN core could not start',
+            ),
             backgroundColor: AppColors.crimson,
-          ));
-        }
+          ),
+        );
       }
       if (!mounted) return;
       setState(() {
@@ -857,7 +885,6 @@ class _HomePageState extends State<HomePage>
         _connectController.forward();
         _pulseController.repeat(reverse: true);
         _startPingTimer();
-        _startDesktopTrafficTimer();
       } catch (e) {
         if (!mounted) return;
         setState(() {
@@ -865,10 +892,12 @@ class _HomePageState extends State<HomePage>
           _statusText = 'ERROR';
         });
         _connectController.reverse();
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(_windowsVpnErrorMessage(e)),
-          backgroundColor: AppColors.crimson,
-        ));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_windowsVpnErrorMessage(e)),
+            backgroundColor: AppColors.crimson,
+          ),
+        );
       }
       return;
     }
@@ -947,23 +976,34 @@ class _HomePageState extends State<HomePage>
           _isConnecting = true;
           _statusText = 'CONNECTING...';
         });
-        if (_usingXray) {
-          if (_hasNativeVpn) {
-            await VpnTileService.instance.stopXray();
+        var started = false;
+        String? startError;
+        try {
+          if (_usingXray) {
+            if (_hasNativeVpn) {
+              await VpnTileService.instance.stopXray();
+            } else {
+              await _stopWindowsVpnCore();
+            }
+          } else if (_hasNativeVpn) {
+            await _vpn.singbox.stopVPN();
           } else {
             await _stopWindowsVpnCore();
           }
-        } else {
-          await _vpn.singbox.stopVPN();
-        }
-        await Future.delayed(const Duration(milliseconds: 500));
-        var started = false;
-        if (_hasNativeVpn) {
-          started =
-              await VpnTileService.instance.startXray(xrayConfig, serverName);
-        } else {
-          await _startWindowsXrayCore(xrayConfig);
-          started = true;
+          await Future.delayed(const Duration(milliseconds: 500));
+          if (_hasNativeVpn) {
+            started = await VpnTileService.instance.startXray(
+              xrayConfig,
+              serverName,
+            );
+          } else {
+            await _startWindowsXrayCore(xrayConfig);
+            started = true;
+          }
+        } catch (e) {
+          startError = _hasNativeVpn
+              ? 'VPN start error: $e'
+              : _windowsVpnErrorMessage(e);
         }
         if (!mounted) return;
         setState(() {
@@ -973,6 +1013,23 @@ class _HomePageState extends State<HomePage>
           _isConnecting = false;
           _statusText = started ? 'CONNECTED' : 'ERROR';
         });
+        if (started) {
+          await VpnTileService.instance.updateState(
+            connected: true,
+            serverName: serverName,
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                startError ??
+                    VpnTileService.instance.lastXrayError ??
+                    'VPN core could not start',
+              ),
+              backgroundColor: AppColors.crimson,
+            ),
+          );
+        }
       }
       return;
     }
@@ -997,7 +1054,11 @@ class _HomePageState extends State<HomePage>
       });
       try {
         if (_usingXray) {
-          await VpnTileService.instance.stopXray();
+          if (_hasNativeVpn) {
+            await VpnTileService.instance.stopXray();
+          } else {
+            await _stopWindowsVpnCore();
+          }
           _usingXray = false;
         } else if (_hasNativeVpn) {
           await _vpn.singbox.stopVPN();
@@ -1019,6 +1080,8 @@ class _HomePageState extends State<HomePage>
           }
         } else {
           await _startWindowsVpnCore();
+          _isSwitchingServer = false;
+          _vpn.isConnected = true;
           if (mounted) {
             setState(() {
               _isConnected = true;
@@ -1033,14 +1096,23 @@ class _HomePageState extends State<HomePage>
         }
       } catch (e) {
         _isSwitchingServer = false;
+        _vpn.isConnected = false;
+        _usingXray = false;
         if (mounted) {
           setState(() {
+            _isConnected = false;
             _isConnecting = false;
             _statusText = 'ERROR';
           });
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          _connectController.reverse();
+          _pulseController.stop();
+          _stopPingTimer();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
               content: Text('Server switch error: $e'),
-              backgroundColor: AppColors.crimson));
+              backgroundColor: AppColors.crimson,
+            ),
+          );
         }
       }
     }
@@ -1053,7 +1125,6 @@ class _HomePageState extends State<HomePage>
     _pingTimer?.cancel();
     _trafficDebounce?.cancel();
     _nativeStartupTimer?.cancel();
-    _desktopTrafficTimer?.cancel();
     _windowsVpn.state.removeListener(_onWindowsVpnStateChanged);
     _statusSub?.cancel();
     _trafficSub?.cancel();
@@ -1096,37 +1167,52 @@ class _HomePageState extends State<HomePage>
   Widget _buildTopBar(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-      child: Row(children: [
-        ClipRRect(
-          borderRadius: BorderRadius.circular(10),
-          child: Image.asset('assets/images/logo.png',
-              width: 36, height: 36, fit: BoxFit.cover),
-        ),
-        const SizedBox(width: 10),
-        const Text('END VPN',
+      child: Row(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: Image.asset(
+              'assets/images/logo.png',
+              width: 36,
+              height: 36,
+              fit: BoxFit.cover,
+            ),
+          ),
+          const SizedBox(width: 10),
+          const Text(
+            'END VPN',
             style: TextStyle(
-                fontFamily: 'Rajdhani',
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
-                color: Colors.white,
-                letterSpacing: 3)),
-        const Spacer(),
-        if (_isDataLoading)
-          const Padding(
-            padding: EdgeInsets.only(right: 8),
-            child: SizedBox(
+              fontFamily: 'Rajdhani',
+              fontSize: 20,
+              fontWeight: FontWeight.w700,
+              color: Colors.white,
+              letterSpacing: 3,
+            ),
+          ),
+          const Spacer(),
+          if (_isDataLoading)
+            const Padding(
+              padding: EdgeInsets.only(right: 8),
+              child: SizedBox(
                 width: 14,
                 height: 14,
                 child: CircularProgressIndicator(
-                    color: AppColors.neonBlue, strokeWidth: 1.5)),
+                  color: AppColors.neonBlue,
+                  strokeWidth: 1.5,
+                ),
+              ),
+            ),
+          const GlassCard(
+            borderRadius: 14,
+            padding: EdgeInsets.all(10),
+            child: Icon(
+              Icons.notifications_none_rounded,
+              color: AppColors.darkText,
+              size: 20,
+            ),
           ),
-        const GlassCard(
-          borderRadius: 14,
-          padding: EdgeInsets.all(10),
-          child: Icon(Icons.notifications_none_rounded,
-              color: AppColors.darkText, size: 20),
-        ),
-      ]),
+        ],
+      ),
     );
   }
 
@@ -1137,7 +1223,8 @@ class _HomePageState extends State<HomePage>
         'country': _singboxConfig.countryCodeForServer(_vpn.serverLocation),
       },
     );
-    final currentCountry = (currentServer['country'] as String?) ??
+    final currentCountry =
+        (currentServer['country'] as String?) ??
         _singboxConfig.countryCodeForServer(_vpn.serverLocation);
 
     return Padding(
@@ -1146,51 +1233,65 @@ class _HomePageState extends State<HomePage>
         borderRadius: 18,
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
         onTap: _showServerSheet,
-        child: Row(children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.10),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+              ),
+              child: Center(child: _FlagBadge(countryCode: currentCountry)),
             ),
-            child: Center(child: _FlagBadge(countryCode: currentCountry)),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
+            const SizedBox(width: 14),
+            Expanded(
               child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                const Text('SERVER',
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'SERVER',
                     style: TextStyle(
-                        fontSize: 10,
-                        fontFamily: 'SpaceMono',
-                        color: AppColors.darkTextSub,
-                        letterSpacing: 2)),
-                Text(
+                      fontSize: 10,
+                      fontFamily: 'SpaceMono',
+                      color: AppColors.darkTextSub,
+                      letterSpacing: 2,
+                    ),
+                  ),
+                  Text(
                     _vpn.serverLocation.isEmpty
                         ? 'Loading...'
                         : _vpn.serverLocation,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.darkText,
-                        fontFamily: 'Rajdhani')),
-              ])),
-          Container(
-            width: 8,
-            height: 8,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: _isConnected ? AppColors.connected : AppColors.darkTextSub,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.darkText,
+                      fontFamily: 'Rajdhani',
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(width: 8),
-          const Icon(Icons.chevron_right_rounded,
-              color: AppColors.darkTextSub, size: 20),
-        ]),
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: _isConnected
+                    ? AppColors.connected
+                    : AppColors.darkTextSub,
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Icon(
+              Icons.chevron_right_rounded,
+              color: AppColors.darkTextSub,
+              size: 20,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1208,11 +1309,14 @@ class _HomePageState extends State<HomePage>
         animation: Listenable.merge([_pulseController, _connectController]),
         builder: (context, child) {
           final Color primaryColor = _isConnecting
-              ? Color.lerp(AppColors.neonBlue, AppColors.warning,
-                  _connectController.value)!
+              ? Color.lerp(
+                  AppColors.neonBlue,
+                  AppColors.warning,
+                  _connectController.value,
+                )!
               : _isConnected
-                  ? AppColors.connected
-                  : AppColors.neonBlue;
+              ? AppColors.connected
+              : AppColors.neonBlue;
           final Color contentColor = _isConnected ? Colors.white : primaryColor;
           final stateMix = _isConnected ? 1.0 : (_isConnecting ? 0.45 : 0.0);
 
@@ -1228,21 +1332,30 @@ class _HomePageState extends State<HomePage>
               children: [
                 if (_isConnecting)
                   const SizedBox(
-                      width: 36,
-                      height: 36,
-                      child: CircularProgressIndicator(
-                          color: AppColors.warning, strokeWidth: 2))
+                    width: 36,
+                    height: 36,
+                    child: CircularProgressIndicator(
+                      color: AppColors.warning,
+                      strokeWidth: 2,
+                    ),
+                  )
                 else
-                  Icon(Icons.power_settings_new_rounded,
-                      size: 52, color: contentColor),
+                  Icon(
+                    Icons.power_settings_new_rounded,
+                    size: 52,
+                    color: contentColor,
+                  ),
                 const SizedBox(height: 8),
-                Text(_statusText,
-                    style: TextStyle(
-                        fontSize: 11,
-                        fontFamily: 'SpaceMono',
-                        fontWeight: FontWeight.w700,
-                        color: contentColor,
-                        letterSpacing: 2)),
+                Text(
+                  _statusText,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontFamily: 'SpaceMono',
+                    fontWeight: FontWeight.w700,
+                    color: contentColor,
+                    letterSpacing: 2,
+                  ),
+                ),
               ],
             ),
           );
@@ -1258,16 +1371,21 @@ class _HomePageState extends State<HomePage>
         child: AnimatedBuilder(
           animation: Listenable.merge([_pulseController, _connectController]),
           builder: (context, child) {
-            final pulse =
-                _isConnected ? 1.0 + (_pulseController.value * 0.03) : 1.0;
+            final pulse = _isConnected
+                ? 1.0 + (_pulseController.value * 0.03)
+                : 1.0;
             final Color primaryColor = _isConnecting
-                ? Color.lerp(AppColors.neonBlue, AppColors.warning,
-                    _connectController.value)!
+                ? Color.lerp(
+                    AppColors.neonBlue,
+                    AppColors.warning,
+                    _connectController.value,
+                  )!
                 : _isConnected
-                    ? AppColors.connected
-                    : AppColors.darkTextSub;
-            final Color contentColor =
-                _isConnected ? Colors.white : primaryColor;
+                ? AppColors.connected
+                : AppColors.darkTextSub;
+            final Color contentColor = _isConnected
+                ? Colors.white
+                : primaryColor;
 
             return Transform.scale(
               scale: pulse,
@@ -1281,8 +1399,9 @@ class _HomePageState extends State<HomePage>
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         border: Border.all(
-                          color: AppColors.connected
-                              .withValues(alpha: 0.08 * _pulseController.value),
+                          color: AppColors.connected.withValues(
+                            alpha: 0.08 * _pulseController.value,
+                          ),
                           width: 1,
                         ),
                       ),
@@ -1294,12 +1413,16 @@ class _HomePageState extends State<HomePage>
                       shape: BoxShape.circle,
                       boxShadow: [
                         BoxShadow(
-                            color: (_isConnected
-                                    ? AppColors.connected
-                                    : Colors.black)
-                                .withValues(alpha: _isConnected ? 0.45 : 0.28),
-                            blurRadius: _isConnected ? 46 : 38,
-                            offset: const Offset(0, 18)),
+                          color:
+                              (_isConnected
+                                      ? AppColors.connected
+                                      : Colors.black)
+                                  .withValues(
+                                    alpha: _isConnected ? 0.45 : 0.28,
+                                  ),
+                          blurRadius: _isConnected ? 46 : 38,
+                          offset: const Offset(0, 18),
+                        ),
                       ],
                     ),
                     child: ClipOval(
@@ -1309,43 +1432,60 @@ class _HomePageState extends State<HomePage>
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             gradient: _isConnected
-                                ? RadialGradient(colors: [
-                                    AppColors.connected.withValues(alpha: 0.98),
-                                    AppColors.connected.withValues(alpha: 0.74),
-                                    const Color(0xFF0A7E3C),
-                                  ])
-                                : RadialGradient(colors: [
-                                    Colors.white.withValues(alpha: 0.22),
-                                    primaryColor.withValues(alpha: 0.12),
-                                    Colors.white.withValues(alpha: 0.055),
-                                  ]),
+                                ? RadialGradient(
+                                    colors: [
+                                      AppColors.connected.withValues(
+                                        alpha: 0.98,
+                                      ),
+                                      AppColors.connected.withValues(
+                                        alpha: 0.74,
+                                      ),
+                                      const Color(0xFF0A7E3C),
+                                    ],
+                                  )
+                                : RadialGradient(
+                                    colors: [
+                                      Colors.white.withValues(alpha: 0.22),
+                                      primaryColor.withValues(alpha: 0.12),
+                                      Colors.white.withValues(alpha: 0.055),
+                                    ],
+                                  ),
                             border: Border.all(
-                                color: _isConnected
-                                    ? Colors.white.withValues(alpha: 0.50)
-                                    : Colors.white.withValues(alpha: 0.22),
-                                width: _isConnected ? 1.4 : 1),
+                              color: _isConnected
+                                  ? Colors.white.withValues(alpha: 0.50)
+                                  : Colors.white.withValues(alpha: 0.22),
+                              width: _isConnected ? 1.4 : 1,
+                            ),
                           ),
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               if (_isConnecting)
                                 const SizedBox(
-                                    width: 36,
-                                    height: 36,
-                                    child: CircularProgressIndicator(
-                                        color: AppColors.warning,
-                                        strokeWidth: 2))
+                                  width: 36,
+                                  height: 36,
+                                  child: CircularProgressIndicator(
+                                    color: AppColors.warning,
+                                    strokeWidth: 2,
+                                  ),
+                                )
                               else
-                                Icon(Icons.power_settings_new_rounded,
-                                    size: 52, color: contentColor),
+                                Icon(
+                                  Icons.power_settings_new_rounded,
+                                  size: 52,
+                                  color: contentColor,
+                                ),
                               const SizedBox(height: 8),
-                              Text(_statusText,
-                                  style: TextStyle(
-                                      fontSize: 11,
-                                      fontFamily: 'SpaceMono',
-                                      fontWeight: FontWeight.w700,
-                                      color: contentColor,
-                                      letterSpacing: 2)),
+                              Text(
+                                _statusText,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontFamily: 'SpaceMono',
+                                  fontWeight: FontWeight.w700,
+                                  color: contentColor,
+                                  letterSpacing: 2,
+                                ),
+                              ),
                             ],
                           ),
                         ),
@@ -1364,35 +1504,46 @@ class _HomePageState extends State<HomePage>
   Widget _buildStatsRow() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24),
-      child: Row(children: [
-        Expanded(
-            child: _StatCard(
-                icon: Icons.timer_rounded,
-                label: 'PING',
-                value: _isConnected ? _ping : '--',
-                color: AppColors.neonBlue)),
-        const SizedBox(width: 12),
-        Expanded(
-            child: ValueListenableBuilder<String>(
-                valueListenable: _downloadSpeed,
-                builder: (_, speed, __) => _StatCard(
-                    icon: Icons.arrow_downward_rounded,
-                    label: 'DOWNLOAD',
-                    value: speed,
-                    color: AppColors.connected))),
-        const SizedBox(width: 12),
-        Expanded(
-            child: ValueListenableBuilder<String>(
-                valueListenable: _uploadSpeed,
-                builder: (_, speed, __) => _StatCard(
-                    icon: Icons.arrow_upward_rounded,
-                    label: 'UPLOAD',
-                    value: speed,
-                    color: AppColors.crimson))),
-      ])
-          .animate(delay: 300.ms)
-          .fadeIn(duration: 600.ms)
-          .slideY(begin: 0.2, end: 0),
+      child:
+          Row(
+                children: [
+                  Expanded(
+                    child: _StatCard(
+                      icon: Icons.timer_rounded,
+                      label: 'PING',
+                      value: _isConnected ? _ping : '--',
+                      color: AppColors.neonBlue,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ValueListenableBuilder<String>(
+                      valueListenable: _downloadSpeed,
+                      builder: (_, speed, __) => _StatCard(
+                        icon: Icons.arrow_downward_rounded,
+                        label: 'DOWNLOAD',
+                        value: speed,
+                        color: AppColors.connected,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ValueListenableBuilder<String>(
+                      valueListenable: _uploadSpeed,
+                      builder: (_, speed, __) => _StatCard(
+                        icon: Icons.arrow_upward_rounded,
+                        label: 'UPLOAD',
+                        value: speed,
+                        color: AppColors.crimson,
+                      ),
+                    ),
+                  ),
+                ],
+              )
+              .animate(delay: 300.ms)
+              .fadeIn(duration: 600.ms)
+              .slideY(begin: 0.2, end: 0),
     );
   }
 
@@ -1402,10 +1553,11 @@ class _HomePageState extends State<HomePage>
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (_) => _ServerSelectSheet(
-          servers: _vpn.servers,
-          currentName: _vpn.serverLocation,
-          configService: _singboxConfig,
-          onSelect: _selectServer),
+        servers: _vpn.servers,
+        currentName: _vpn.serverLocation,
+        configService: _singboxConfig,
+        onSelect: _selectServer,
+      ),
     );
   }
 }
@@ -1415,35 +1567,44 @@ class _StatCard extends StatelessWidget {
   final String label;
   final String value;
   final Color color;
-  const _StatCard(
-      {required this.icon,
-      required this.label,
-      required this.value,
-      required this.color});
+  const _StatCard({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.color,
+  });
 
   @override
   Widget build(BuildContext context) {
     return GlassCard(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-      child: Column(children: [
-        Icon(icon, color: color, size: 18),
-        const SizedBox(height: 6),
-        Text(label,
+      child: Column(
+        children: [
+          Icon(icon, color: color, size: 18),
+          const SizedBox(height: 6),
+          Text(
+            label,
             style: const TextStyle(
-                fontSize: 9,
-                fontFamily: 'SpaceMono',
-                color: AppColors.darkTextSub,
-                letterSpacing: 1.5)),
-        const SizedBox(height: 4),
-        Text(value,
+              fontSize: 9,
+              fontFamily: 'SpaceMono',
+              color: AppColors.darkTextSub,
+              letterSpacing: 1.5,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-                fontSize: 11,
-                fontFamily: 'SpaceMono',
-                fontWeight: FontWeight.w700,
-                color: color)),
-      ]),
+              fontSize: 11,
+              fontFamily: 'SpaceMono',
+              fontWeight: FontWeight.w700,
+              color: color,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1456,8 +1617,11 @@ class _FlagBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (countryCode == 'WORLD') {
-      return const Icon(Icons.public_rounded,
-          color: AppColors.neonBlue, size: 20);
+      return const Icon(
+        Icons.public_rounded,
+        color: AppColors.neonBlue,
+        size: 20,
+      );
     }
 
     return Container(
@@ -1501,7 +1665,11 @@ class _FlagPainter extends CustomPainter {
       paint.color = color;
       canvas.drawRect(
         Rect.fromLTWH(
-            0, size.height * index / total, size.width, size.height / total),
+          0,
+          size.height * index / total,
+          size.width,
+          size.height / total,
+        ),
         paint,
       );
     }
@@ -1510,7 +1678,11 @@ class _FlagPainter extends CustomPainter {
       paint.color = color;
       canvas.drawRect(
         Rect.fromLTWH(
-            size.width * index / total, 0, size.width / total, size.height),
+          size.width * index / total,
+          0,
+          size.width / total,
+          size.height,
+        ),
         paint,
       );
     }
@@ -1520,12 +1692,13 @@ class _FlagPainter extends CustomPainter {
         fill(Colors.white);
         paint.color = const Color(0xFF002F6C);
         canvas.drawRect(
-            Rect.fromLTWH(size.width * 0.34, 0, size.width * 0.18, size.height),
-            paint);
+          Rect.fromLTWH(size.width * 0.34, 0, size.width * 0.18, size.height),
+          paint,
+        );
         canvas.drawRect(
-            Rect.fromLTWH(
-                0, size.height * 0.40, size.width, size.height * 0.20),
-            paint);
+          Rect.fromLTWH(0, size.height * 0.40, size.width, size.height * 0.20),
+          paint,
+        );
         break;
       case 'NL':
         bandY(0, 3, const Color(0xFFAE1C28));
@@ -1539,7 +1712,9 @@ class _FlagPainter extends CustomPainter {
         }
         paint.color = const Color(0xFF3C3B6E);
         canvas.drawRect(
-            Rect.fromLTWH(0, 0, size.width * 0.45, size.height * 0.54), paint);
+          Rect.fromLTWH(0, 0, size.width * 0.45, size.height * 0.54),
+          paint,
+        );
         break;
       case 'DE':
         bandY(0, 3, Colors.black);
@@ -1567,17 +1742,29 @@ class _FlagPainter extends CustomPainter {
         paint
           ..color = Colors.white
           ..strokeWidth = size.height * 0.30;
-        canvas.drawLine(Offset(size.width / 2, 0),
-            Offset(size.width / 2, size.height), paint);
-        canvas.drawLine(Offset(0, size.height / 2),
-            Offset(size.width, size.height / 2), paint);
+        canvas.drawLine(
+          Offset(size.width / 2, 0),
+          Offset(size.width / 2, size.height),
+          paint,
+        );
+        canvas.drawLine(
+          Offset(0, size.height / 2),
+          Offset(size.width, size.height / 2),
+          paint,
+        );
         paint
           ..color = const Color(0xFFC8102E)
           ..strokeWidth = size.height * 0.16;
-        canvas.drawLine(Offset(size.width / 2, 0),
-            Offset(size.width / 2, size.height), paint);
-        canvas.drawLine(Offset(0, size.height / 2),
-            Offset(size.width, size.height / 2), paint);
+        canvas.drawLine(
+          Offset(size.width / 2, 0),
+          Offset(size.width / 2, size.height),
+          paint,
+        );
+        canvas.drawLine(
+          Offset(0, size.height / 2),
+          Offset(size.width, size.height / 2),
+          paint,
+        );
         break;
       case 'RU':
         bandY(0, 3, Colors.white);
@@ -1611,17 +1798,19 @@ class _ServerSelectSheet extends StatelessWidget {
   final String currentName;
   final SingboxConfigService configService;
   final Future<void> Function(Map<String, dynamic>) onSelect;
-  const _ServerSelectSheet(
-      {required this.servers,
-      required this.currentName,
-      required this.configService,
-      required this.onSelect});
+  const _ServerSelectSheet({
+    required this.servers,
+    required this.currentName,
+    required this.configService,
+    required this.onSelect,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding:
-          EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
       child: ClipRRect(
         borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
         child: BackdropFilter(
@@ -1630,8 +1819,9 @@ class _ServerSelectSheet extends StatelessWidget {
             decoration: const BoxDecoration(
               color: Color(0xFF0F0F20),
               borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-              border:
-                  Border(top: BorderSide(color: Color(0xFF1E1E40), width: 1)),
+              border: Border(
+                top: BorderSide(color: Color(0xFF1E1E40), width: 1),
+              ),
             ),
             padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
             child: Column(
@@ -1639,74 +1829,101 @@ class _ServerSelectSheet extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Center(
-                    child: Container(
-                        width: 40,
-                        height: 4,
-                        margin: const EdgeInsets.only(bottom: 16),
-                        decoration: BoxDecoration(
-                            color: const Color(0xFF1E1E40),
-                            borderRadius: BorderRadius.circular(2)))),
-                const Text('SELECT SERVER',
-                    style: TextStyle(
-                        fontSize: 13,
-                        fontFamily: 'SpaceMono',
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.darkTextSub,
-                        letterSpacing: 2)),
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 16),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1E1E40),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const Text(
+                  'SELECT SERVER',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontFamily: 'SpaceMono',
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.darkTextSub,
+                    letterSpacing: 2,
+                  ),
+                ),
                 const SizedBox(height: 16),
                 if (servers.isEmpty)
                   const Center(
-                      child: Text('Servers not found',
-                          style: TextStyle(color: AppColors.darkTextSub)))
+                    child: Text(
+                      'Servers not found',
+                      style: TextStyle(color: AppColors.darkTextSub),
+                    ),
+                  )
                 else
-                  ...servers.map((s) => Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: GlassCard(
-                          blur: 0,
-                          borderRadius: 14,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 12),
-                          onTap: () {
-                            if (s['supported'] == false) {
-                              onSelect(s);
-                              return;
-                            }
-                            Navigator.pop(context);
-                            onSelect(s);
-                          },
-                          child: Row(children: [
+                  ...servers.map(
+                    (s) => Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: GlassCard(
+                        blur: 0,
+                        borderRadius: 14,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                        onTap: () {
+                          if (s['supported'] == false) return;
+                          Navigator.pop(context);
+                          onSelect(s);
+                        },
+                        child: Row(
+                          children: [
                             _FlagBadge(
-                              countryCode: (s['country'] as String?) ??
+                              countryCode:
+                                  (s['country'] as String?) ??
                                   configService.countryCodeForServer(
-                                      s['name'] as String),
+                                    s['name'] as String,
+                                  ),
                             ),
                             const SizedBox(width: 12),
                             Expanded(
-                                child: Text(s['name'] as String,
-                                    style: TextStyle(
-                                        fontSize: 15,
-                                        fontWeight: FontWeight.w600,
-                                        fontFamily: 'Rajdhani',
-                                        color: s['supported'] == false
-                                            ? AppColors.darkTextSub
-                                            : s['name'] == currentName
-                                                ? AppColors.connected
-                                                : AppColors.darkText))),
+                              child: Text(
+                                s['name'] as String,
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                  fontFamily: 'Rajdhani',
+                                  color: s['supported'] == false
+                                      ? AppColors.darkTextSub
+                                      : s['name'] == currentName
+                                      ? AppColors.connected
+                                      : AppColors.darkText,
+                                ),
+                              ),
+                            ),
                             if (s['supported'] == false)
-                              const Text('XHTTP',
-                                  style: TextStyle(
-                                      color: AppColors.darkTextSub,
-                                      fontSize: 10,
-                                      fontFamily: 'SpaceMono'))
+                              const Text(
+                                'UNSUPPORTED',
+                                style: TextStyle(
+                                  color: AppColors.darkTextSub,
+                                  fontSize: 10,
+                                  fontFamily: 'SpaceMono',
+                                ),
+                              )
                             else if (s['name'] == currentName)
-                              const Icon(Icons.check_rounded,
-                                  color: AppColors.connected, size: 18)
+                              const Icon(
+                                Icons.check_rounded,
+                                color: AppColors.connected,
+                                size: 18,
+                              )
                             else
-                              const Icon(Icons.chevron_right_rounded,
-                                  color: AppColors.darkTextSub, size: 18),
-                          ]),
+                              const Icon(
+                                Icons.chevron_right_rounded,
+                                color: AppColors.darkTextSub,
+                                size: 18,
+                              ),
+                          ],
                         ),
-                      )),
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),

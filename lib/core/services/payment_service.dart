@@ -58,7 +58,7 @@ class PaymentService {
         return false;
       }
 
-      return _launchPaymentUrl(uri);
+      return await _launchPaymentUrl(uri);
     } on DioException catch (e) {
       _log.e('Payment network error: ${_dioSummary(e)}');
       return false;

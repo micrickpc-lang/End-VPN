@@ -25,7 +25,7 @@ mixin _Ad {
   late final MethodChannel _channel = _createMethodChannel();
 
   Future<void> destroy() async {
-    _channel.invokeMethod('destroy');
+    await _channel.invokeMethod('destroy');
     _finalizer.detach(this);
   }
 }

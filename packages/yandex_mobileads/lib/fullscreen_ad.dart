@@ -36,7 +36,7 @@ abstract class _FullscreenAd with _Ad {
   /// Set an event listener before calling this method for callbacks
   /// about events that occur when an ad is displayed.
   Future<void> show() async {
-    _channel.invokeMethod('show');
+    await _channel.invokeMethod('show');
   }
 
   Future waitForDismiss();

@@ -23,6 +23,7 @@ class MainActivity : FlutterActivity() {
     private val tileReceiver = VpnBroadcastReceiver()
     private var pendingXrayConfig: String? = null
     private var pendingXrayServer: String = ""
+    private var pendingXrayRequestId: Long = -1L
     private var pendingXrayResult: MethodChannel.Result? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -50,8 +51,16 @@ class MainActivity : FlutterActivity() {
         VpnBroadcastReceiver.connectCallback = {
             runOnUiThread { methodChannel.invokeMethod("onTileConnect", null) }
         }
-        VpnBroadcastReceiver.statusCallback = { status ->
-            runOnUiThread { methodChannel.invokeMethod("onXrayStatus", status) }
+        VpnBroadcastReceiver.statusCallback = { status, error, requestId ->
+            runOnUiThread {
+                methodChannel.invokeMethod(
+                    "onXrayStatus", mapOf(
+                        "status" to status,
+                        "error" to error,
+                        "requestId" to requestId,
+                    )
+                )
+            }
         }
 
         methodChannel.setMethodCallHandler { call, result ->
@@ -76,13 +85,15 @@ class MainActivity : FlutterActivity() {
                 "startXray" -> {
                     val config = call.argument<String>("config").orEmpty()
                     val server = call.argument<String>("server").orEmpty()
+                    val requestId = call.argument<Long>("requestId") ?: -1L
                     val permissionIntent = android.net.VpnService.prepare(this)
                     if (permissionIntent == null) {
-                        startXrayService(config, server)
+                        startXrayService(config, server, requestId)
                         result.success(true)
                     } else {
                         pendingXrayConfig = config
                         pendingXrayServer = server
+                        pendingXrayRequestId = requestId
                         pendingXrayResult = result
                         @Suppress("DEPRECATION")
                         startActivityForResult(permissionIntent, XRAY_VPN_PERMISSION_CODE)
@@ -142,10 +153,11 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun startXrayService(config: String, server: String) {
+    private fun startXrayService(config: String, server: String, requestId: Long) {
         val intent = Intent(this, XrayVpnService::class.java).apply {
             putExtra(XrayVpnService.EXTRA_CONFIG, config)
             putExtra(XrayVpnService.EXTRA_SERVER, server)
+            putExtra(XrayVpnService.EXTRA_REQUEST_ID, requestId)
         }
         ContextCompat.startForegroundService(this, intent)
     }
@@ -155,12 +167,13 @@ class MainActivity : FlutterActivity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode != XRAY_VPN_PERMISSION_CODE) return
         if (resultCode == RESULT_OK) {
-            startXrayService(pendingXrayConfig.orEmpty(), pendingXrayServer)
+            startXrayService(pendingXrayConfig.orEmpty(), pendingXrayServer, pendingXrayRequestId)
             pendingXrayResult?.success(true)
         } else {
             pendingXrayResult?.error("VPN_PERMISSION_DENIED", "VPN permission denied", null)
         }
         pendingXrayConfig = null
+        pendingXrayRequestId = -1L
         pendingXrayResult = null
     }
 
@@ -172,4 +185,3 @@ class MainActivity : FlutterActivity() {
         super.onDestroy()
     }
 }
-

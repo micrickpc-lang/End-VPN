@@ -6,9 +6,11 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Remove broad package visibility if a dependency contributes it. -->
     <uses-permission
         android:name="android.permission.QUERY_ALL_PACKAGES"
-        tools:node="remove" />
+        tools:node="remove"
+        tools:ignore="QueryAllPackagesPermission" />
     <uses-permission
         android:name="android.permission.RECEIVE_BOOT_COMPLETED"
         tools:node="remove" />
@@ -54,12 +56,14 @@
                 android:value="vpn_connection_status_notification" />
         </service>
 
+        <!-- Active VPN services qualify for systemExempted without alarm permission. -->
         <service
             android:name=".XrayVpnService"
             android:process=":xray"
             android:exported="false"
             android:permission="android.permission.BIND_VPN_SERVICE"
-            android:foregroundServiceType="systemExempted">
+            android:foregroundServiceType="systemExempted"
+            tools:ignore="ForegroundServicePermission">
             <intent-filter>
                 <action android:name="android.net.VpnService" />
             </intent-filter>

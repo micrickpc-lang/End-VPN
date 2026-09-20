@@ -26,15 +26,15 @@ abstract class _FullscreenAdLoader {
       _pluginType: _flutter,
       _pluginVersion: MobileAds.pluginVersion,
     }..addAll(adRequestConfiguration?.parameters ?? {});
-    _channel.invokeMethod('load', map);
+    await _channel.invokeMethod('load', map);
   }
 
   Future<void> cancelLoading() async {
-    _channel.invokeMethod('cancelLoading');
+    await _channel.invokeMethod('cancelLoading');
   }
 
   Future<void> destroy() async {
-    _channel.invokeMethod('destroy');
+    await _channel.invokeMethod('destroy');
     _finalizer.detach(this);
   }
 }

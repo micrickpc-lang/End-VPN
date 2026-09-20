@@ -161,7 +161,45 @@ void main() {
       expect(result.outbounds, isEmpty);
       expect(result.servers, hasLength(1));
       expect(result.servers.first.xrayConfig, isNotEmpty);
+      expect(result.usableServerCount, 1);
       expect(result.configJson, isNotEmpty);
+    });
+
+    test('builds TLS XHTTP nodes without bogus Reality settings', () {
+      const clash = '''
+proxies:
+  - name: TLS XHTTP
+    type: vless
+    server: vpn.example.com
+    port: 443
+    uuid: 00000000-0000-0000-0000-000000000000
+    tls: true
+    servername: edge.example.com
+    network: xhttp
+    xhttp-opts:
+      path: /vpn
+''';
+      final result = service.parseSubscription(clash);
+      final server = result.servers.single;
+      final xray = jsonDecode(server.xrayConfig!) as Map<String, dynamic>;
+      final stream = (xray['outbounds'] as List).first['streamSettings'] as Map;
+
+      expect(server.supported, isTrue);
+      expect(stream['security'], 'tls');
+      expect(stream['tlsSettings']['serverName'], 'edge.example.com');
+      expect(stream.containsKey('realitySettings'), isFalse);
+    });
+
+    test('marks unsupported transports unavailable for selection', () {
+      final result = service.parseSubscription(
+        'vless://00000000-0000-0000-0000-000000000000@example.com:443'
+        '?security=tls&type=quic#Unsupported',
+      );
+
+      expect(result.outbounds, isEmpty);
+      expect(result.usableServerCount, 0);
+      expect(result.servers.single.supported, isFalse);
+      expect(result.servers.single.xrayConfig, isNull);
     });
 
     test('keeps HTTP Upgrade nodes supported by bundled sing-box core', () {
